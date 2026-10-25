@@ -425,41 +425,62 @@ end
 
 -- ============================ SERVER HOP ENGINE ============================
 local hopping = false
+local lastFetchTime, cachedServers = 0, nil
 
 local function fetchServerList()
+    local now = os.clock()
+    if cachedServers and (now - lastFetchTime) < 15 and #cachedServers > 0 then
+        return cachedServers
+    end
+
+    local list = {}
+    local function getBody(url)
+        local body = nil
+        pcall(function()
+            local fn = request or http_request or (http and http.request) or (syn and syn.request)
+            if fn then
+                local res = fn({ Url = url, Method = "GET" })
+                body = res and (res.Body or res.body)
+            end
+        end)
+        if not (body and #body > 0) then
+            pcall(function() body = game:HttpGet(url) end)
+        end
+        return body
+    end
+
     local endpoints = {
         ("https://games.roproxy.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(PLACE_ID),
         ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(PLACE_ID),
-        ("https://games.roproxy.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=100"):format(PLACE_ID),
     }
+
     for _, url in ipairs(endpoints) do
-        local body = nil
-        pcall(function()
-            local fn = request or http_request or (http and http.request)
-            if fn then
-                local res = fn({ Url = url, Method = "GET" })
-                if res and res.Body and #res.Body > 0 then body = res.Body end
-            end
-        end)
-        if not body then
-            pcall(function() body = game:HttpGet(url) end)
-        end
-        if body and #body > 0 then
+        local body = getBody(url)
+        if body and type(body) == "string" and #body > 0 then
             local ok, data = pcall(function() return HttpService:JSONDecode(body) end)
             if ok and type(data) == "table" and type(data.data) == "table" and #data.data > 0 then
-                return data.data
+                for _, s in ipairs(data.data) do
+                    if s.id and s.id ~= CURRENT_JOB and type(s.playing) == "number" and s.playing < (s.maxPlayers or 999) then
+                        list[#list + 1] = s
+                    end
+                end
+                if #list > 0 then break end
             end
         end
-        task.wait(0.2)
     end
-    return nil
+
+    lastFetchTime = now
+    cachedServers = list
+    return list
 end
 
-local function doServerHop()
+local function doServerHop(statusCallback)
     if hopping then return false end
     hopping = true
 
-    -- Auto-execute persistence di server baru
+    if type(statusCallback) == "function" then statusCallback("Mencari server...") end
+
+    -- Re-inject diri sendiri di server baru via queueonteleport
     if type(queueonteleport) == "function" then
         pcall(queueonteleport, string.format([[
             task.spawn(function()
@@ -471,69 +492,93 @@ local function doServerHop()
     end
 
     local serverList = fetchServerList()
-    local targetServerId = nil
+    local candidates = {}
 
     if serverList and #serverList > 0 then
-        local candidates = {}
-        -- Filter tahap 1: Sesuai filter pemain yang ditentukan
+        -- Filter sesuai preferensi min/max player
         for _, s in ipairs(serverList) do
-            if s.id and s.id ~= CURRENT_JOB and type(s.playing) == "number" and s.playing < (s.maxPlayers or 999) then
-                if s.playing >= (Settings.hopMinPlayers or 1) and (Settings.hopMaxPlayers <= 0 or s.playing <= Settings.hopMaxPlayers) then
-                    candidates[#candidates + 1] = s
-                end
+            local minOk = (Settings.hopMinPlayers or 0) <= 0 or s.playing >= Settings.hopMinPlayers
+            local maxOk = (Settings.hopMaxPlayers or 0) <= 0 or s.playing <= Settings.hopMaxPlayers
+            if minOk and maxOk then
+                candidates[#candidates + 1] = s
             end
         end
 
-        -- Filter tahap 2 (Relaxation): Jika filter terlalu sempit, ambil server mana pun yang ada slot
+        -- Relaksasi filter jika tidak ada server yang memenuhi
         if #candidates == 0 then
             for _, s in ipairs(serverList) do
-                if s.id and s.id ~= CURRENT_JOB and type(s.playing) == "number" and s.playing < (s.maxPlayers or 999) then
-                    candidates[#candidates + 1] = s
-                end
+                candidates[#candidates + 1] = s
             end
         end
 
-        if #candidates > 0 then
-            if Settings.hopPreferEmpty then
-                table.sort(candidates, function(a, b) return a.playing < b.playing end)
-                local minPlayers = candidates[1].playing
-                local tier = {}
-                for _, s in ipairs(candidates) do
-                    if s.playing <= minPlayers + 2 then tier[#tier + 1] = s end
-                end
-                targetServerId = tier[math.random(#tier)].id
-            else
-                targetServerId = candidates[math.random(#candidates)].id
+        -- Urutkan server sepi jika hopPreferEmpty aktif
+        if Settings.hopPreferEmpty then
+            table.sort(candidates, function(a, b) return a.playing < b.playing end)
+            local minP = candidates[1].playing
+            local tier = {}
+            for _, s in ipairs(candidates) do
+                if s.playing <= minP + 2 then tier[#tier + 1] = s end
             end
+            candidates = tier
+        end
+
+        -- Acak kandidat
+        for i = #candidates, 2, -1 do
+            local j = math.random(i)
+            candidates[i], candidates[j] = candidates[j], candidates[i]
         end
     end
 
-    -- Listener jika instance teleportasi gagal
+    local candidateIdx = 0
     local failConn = nil
-    failConn = TeleportService.TeleportInitFailed:Connect(function(plr, result, msg)
-        if plr == LocalPlayer then
-            print("[Yancok AutoHop] Gagal ke instance spesifik, mencoba matchmaking acak...")
+
+    local function tryNextServer()
+        candidateIdx = candidateIdx + 1
+        local target = candidates[candidateIdx]
+
+        if not target then
+            -- Habis semua kandidat: coba Teleport default roblox
             if failConn then pcall(function() failConn:Disconnect() end) end
-            task.wait(1)
-            pcall(function() TeleportService:Teleport(PLACE_ID, LocalPlayer) end)
+            if type(statusCallback) == "function" then statusCallback("Matchmaking acak...") end
+            print("[Yancok AutoHop] Mencoba Teleport native...")
+            local ok = pcall(function() TeleportService:Teleport(PLACE_ID, LocalPlayer) end)
+            if not ok then
+                hopping = false
+                cachedServers = nil
+                if type(statusCallback) == "function" then statusCallback("Gagal, coba lagi") end
+            end
+            return
+        end
+
+        local msg = ("Server #%d (%d plr)..."):format(candidateIdx, target.playing)
+        if type(statusCallback) == "function" then statusCallback(msg) end
+        print("[Yancok AutoHop] " .. msg .. " [ID: " .. tostring(target.id) .. "]")
+
+        pcall(function()
+            TeleportService:TeleportToPlaceInstance(PLACE_ID, target.id, LocalPlayer)
+        end)
+    end
+
+    failConn = TeleportService.TeleportInitFailed:Connect(function(plr, result, errMsg)
+        if plr == LocalPlayer then
+            print("[Yancok AutoHop] Server gagal/penuh, mencoba server berikutnya...")
+            task.wait(0.5)
+            tryNextServer()
         end
     end)
 
-    -- Safety timeout (15 detik)
-    task.delay(15, function()
+    -- Safety timeout guard: lepas status hopping jika macet
+    task.delay(20, function()
         if hopping then
             hopping = false
+            cachedServers = nil
             if failConn then pcall(function() failConn:Disconnect() end) end
+            if type(statusCallback) == "function" then statusCallback("Timeout, coba lagi") end
+            print("[Yancok AutoHop] Timeout hop dilepas.")
         end
     end)
 
-    if targetServerId then
-        print("[Yancok AutoHop] Berpindah ke server: " .. tostring(targetServerId))
-        pcall(function() TeleportService:TeleportToPlaceInstance(PLACE_ID, targetServerId, LocalPlayer) end)
-    else
-        print("[Yancok AutoHop] Menggunakan native Teleport matchmaking...")
-        pcall(function() TeleportService:Teleport(PLACE_ID, LocalPlayer) end)
-    end
+    tryNextServer()
     return true
 end
 
@@ -542,7 +587,7 @@ task.spawn(function()
     local startTime = os.clock()
     hopBaseClaims = totalClaims
     while getgenv()[SCRIPT_ID] == RUN_ID do
-        task.wait(3)
+        task.wait(4)
         if Settings.autoHop and not hopping then
             local elapsedSec = os.clock() - startTime
             local claimsGained = totalClaims - hopBaseClaims
@@ -554,17 +599,20 @@ task.spawn(function()
             elseif Settings.hopMode == "After Steals" then
                 ready = (claimsGained >= Settings.hopSteals)
             elseif Settings.hopMode == "No Match" then
-                ready = (noMatchSec >= Settings.hopNoMatchDelay)
+                -- Jangan hop di No Match jika pemain baru join atau belum pernah claim
+                ready = (claimsGained > 0 or elapsedSec > 90) and (noMatchSec >= Settings.hopNoMatchDelay)
             else -- Any
                 ready = (elapsedSec >= Settings.hopInterval * 60)
                      or (claimsGained >= Settings.hopSteals)
-                     or (noMatchSec >= Settings.hopNoMatchDelay)
+                     or ((claimsGained > 0 or elapsedSec > 90) and noMatchSec >= Settings.hopNoMatchDelay)
             end
 
             if ready then
-                doServerHop()
-                startTime = os.clock()
-                hopBaseClaims = totalClaims
+                local started = doServerHop()
+                if started then
+                    startTime = os.clock()
+                    hopBaseClaims = totalClaims
+                end
             end
         end
     end
@@ -653,83 +701,137 @@ local function addStroke(col, th, p)
     return s
 end
 
--- Panel Pos Keeper (Pojok Kanan Bawah)
+-- =========================== MINI BAR (FLOATING BADGE) =======================
+local MiniBar = Instance.new("Frame")
+MiniBar.Name = "MiniBar"
+MiniBar.AnchorPoint = Vector2.new(1, 1)
+MiniBar.Position = UDim2.new(1, -12, 1, -12)
+MiniBar.Size = UDim2.new(0, 155, 0, 26)
+MiniBar.BackgroundColor3 = Theme.Background
+MiniBar.BorderSizePixel = 0
+MiniBar.Active = true
+MiniBar.Visible = false
+MiniBar.Parent = ScreenGui
+addCorner(6, MiniBar)
+addStroke(Theme.Accent, 1, MiniBar)
+
+local MiniLabel = Instance.new("TextLabel")
+MiniLabel.Text = "🔥 Yancok: 0 Telur ⚡"
+MiniLabel.Font = FONT_BOLD
+MiniLabel.TextSize = 10
+MiniLabel.TextColor3 = Theme.Accent
+MiniLabel.Size = UDim2.new(1, 0, 1, 0)
+MiniLabel.BackgroundTransparency = 1
+MiniLabel.Parent = MiniBar
+
+local MiniBtn = Instance.new("TextButton")
+MiniBtn.Size = UDim2.new(1, 0, 1, 0)
+MiniBtn.BackgroundTransparency = 1
+MiniBtn.Text = ""
+MiniBtn.Parent = MiniBar
+
+-- =========================== MAIN WINDOW (COMPACT) ==========================
 local Window = Instance.new("Frame")
 Window.Name = "Window"
 Window.AnchorPoint = Vector2.new(1, 1)
 Window.Position = UDim2.new(1, -12, 1, -12)
-Window.Size = UDim2.new(0, 320, 0, 360)
+Window.Size = UDim2.new(0, 210, 0, 225)
 Window.BackgroundColor3 = Theme.Background
 Window.BorderSizePixel = 0
 Window.Active = true
 Window.ClipsDescendants = true
 Window.Parent = ScreenGui
 addCorner(8, Window)
-addStroke(Theme.Border, 1.5, Window)
+addStroke(Theme.Border, 1.2, Window)
 
--- Draggable
-do
+-- Minimize / Restore handler
+local function setMinimized(mini)
+    Window.Visible = not mini
+    MiniBar.Visible = mini
+end
+
+MiniBtn.MouseButton1Click:Connect(function()
+    setMinimized(false)
+end)
+
+-- Draggable handler
+local function makeDraggable(frame, handle)
     local dragging, dragStart, startPos = false, nil, nil
-    Window.InputBegan:Connect(function(input)
+    handle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            local mPos = UserInputService:GetMouseLocation()
-            if mPos.Y - Window.AbsolutePosition.Y <= 38 then
-                dragging = true
-                dragStart = input.Position
-                startPos = Window.Position
-                input.Changed:Connect(function()
-                    if input.UserInputState == Enum.UserInputState.End then dragging = false end
-                end)
-            end
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
         end
     end)
     UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local delta = input.Position - dragStart
-            Window.AnchorPoint = Vector2.new(0, 0)
-            Window.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            frame.AnchorPoint = Vector2.new(0, 0)
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
     end)
 end
 
+makeDraggable(MiniBar, MiniBar)
+
 -- Header
 local Header = Instance.new("Frame")
-Header.Size = UDim2.new(1, 0, 0, 38)
+Header.Size = UDim2.new(1, 0, 0, 26)
 Header.BackgroundColor3 = Theme.Header
 Header.BorderSizePixel = 0
 Header.Parent = Window
 addCorner(8, Header)
+makeDraggable(Window, Header)
 
 local Title = Instance.new("TextLabel")
-Title.Text = "🔥 YANCOK — STEAL AN EGG"
+Title.Text = "🔥 YANCOK (Keyless)"
 Title.Font = FONT_BOLD
-Title.TextSize = 13
+Title.TextSize = 10
 Title.TextColor3 = Theme.Accent
-Title.Position = UDim2.new(0, 12, 0, 0)
-Title.Size = UDim2.new(1, -50, 1, 0)
+Title.Position = UDim2.new(0, 8, 0, 0)
+Title.Size = UDim2.new(1, -52, 1, 0)
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.BackgroundTransparency = 1
 Title.Parent = Header
 
+local MinBtn = Instance.new("TextButton")
+MinBtn.Text = "—"
+MinBtn.Font = FONT_BOLD
+MinBtn.TextSize = 11
+MinBtn.TextColor3 = Theme.TextSub
+MinBtn.Size = UDim2.new(0, 20, 0, 20)
+MinBtn.Position = UDim2.new(1, -44, 0, 3)
+MinBtn.BackgroundColor3 = Theme.Card
+MinBtn.BorderSizePixel = 0
+MinBtn.Parent = Header
+addCorner(4, MinBtn)
+MinBtn.MouseButton1Click:Connect(function()
+    setMinimized(true)
+end)
+
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Text = "✕"
 CloseBtn.Font = FONT_BOLD
-CloseBtn.TextSize = 12
+CloseBtn.TextSize = 10
 CloseBtn.TextColor3 = Theme.TextSub
-CloseBtn.Size = UDim2.new(0, 26, 0, 26)
-CloseBtn.Position = UDim2.new(1, -30, 0, 6)
+CloseBtn.Size = UDim2.new(0, 20, 0, 20)
+CloseBtn.Position = UDim2.new(1, -22, 0, 3)
 CloseBtn.BackgroundColor3 = Theme.Card
 CloseBtn.BorderSizePixel = 0
 CloseBtn.Parent = Header
 addCorner(4, CloseBtn)
 CloseBtn.MouseButton1Click:Connect(function()
-    ScreenGui:Destroy()
+    setMinimized(true)
 end)
 
 -- Main Scroll Body
 local Scroll = Instance.new("ScrollingFrame")
-Scroll.Size = UDim2.new(1, -16, 1, -48)
-Scroll.Position = UDim2.new(0, 8, 0, 42)
+Scroll.Size = UDim2.new(1, -10, 1, -32)
+Scroll.Position = UDim2.new(0, 5, 0, 29)
 Scroll.BackgroundTransparency = 1
 Scroll.BorderSizePixel = 0
 Scroll.ScrollBarThickness = 2
@@ -738,89 +840,68 @@ Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 Scroll.Parent = Window
 
 local List = Instance.new("UIListLayout")
-List.Padding = UDim.new(0, 6)
+List.Padding = UDim.new(0, 4)
 List.SortOrder = Enum.SortOrder.LayoutOrder
 List.Parent = Scroll
 
--- Claim Counter Card
+-- Counter Card
 local ClaimCard = Instance.new("Frame")
-ClaimCard.Size = UDim2.new(1, 0, 0, 48)
+ClaimCard.Size = UDim2.new(1, 0, 0, 24)
 ClaimCard.BackgroundColor3 = Theme.Card
 ClaimCard.BorderSizePixel = 0
 ClaimCard.Parent = Scroll
-addCorner(6, ClaimCard)
+addCorner(5, ClaimCard)
 
 local ClaimLabel = Instance.new("TextLabel")
-ClaimLabel.Text = "Telur Terklaim: 0"
+ClaimLabel.Text = "Telur: 0  |  AFK Aktif"
 ClaimLabel.Font = FONT_BOLD
-ClaimLabel.TextSize = 13
+ClaimLabel.TextSize = 10
 ClaimLabel.TextColor3 = Theme.Green
-ClaimLabel.Position = UDim2.new(0, 10, 0, 6)
-ClaimLabel.Size = UDim2.new(1, -20, 0, 18)
+ClaimLabel.Size = UDim2.new(1, -10, 1, 0)
+ClaimLabel.Position = UDim2.new(0, 8, 0, 0)
 ClaimLabel.TextXAlignment = Enum.TextXAlignment.Left
 ClaimLabel.BackgroundTransparency = 1
 ClaimLabel.Parent = ClaimCard
 
-local RateLabel = Instance.new("TextLabel")
-RateLabel.Text = "Status: 100% Keyless | GitHub: @" .. GITHUB_USER
-RateLabel.Font = FONT_REG
-RateLabel.TextSize = 10
-RateLabel.TextColor3 = Theme.TextSub
-RateLabel.Position = UDim2.new(0, 10, 0, 26)
-RateLabel.Size = UDim2.new(1, -20, 0, 16)
-RateLabel.TextXAlignment = Enum.TextXAlignment.Left
-RateLabel.BackgroundTransparency = 1
-RateLabel.Parent = ClaimCard
-
 task.spawn(function()
     while getgenv()[SCRIPT_ID] == RUN_ID do
         task.wait(1)
-        ClaimLabel.Text = "Telur Terklaim: " .. tostring(totalClaims)
+        ClaimLabel.Text = "Telur: " .. tostring(totalClaims) .. "  |  AFK Aktif"
+        MiniLabel.Text = "🔥 Yancok: " .. tostring(totalClaims) .. " ⚡"
     end
 end)
 
--- Helper untuk Card Toggle
-local function createToggle(title, desc, initialVal, onToggle)
+-- Helper Toggle Compact
+local function createToggle(title, initialVal, onToggle)
     local card = Instance.new("Frame")
-    card.Size = UDim2.new(1, 0, 0, 50)
+    card.Size = UDim2.new(1, 0, 0, 26)
     card.BackgroundColor3 = Theme.Card
     card.BorderSizePixel = 0
     card.Parent = Scroll
-    addCorner(6, card)
+    addCorner(5, card)
 
-    local l1 = Instance.new("TextLabel")
-    l1.Text = title
-    l1.Font = FONT_BOLD
-    l1.TextSize = 11
-    l1.TextColor3 = Theme.Text
-    l1.Position = UDim2.new(0, 10, 0, 8)
-    l1.Size = UDim2.new(1, -85, 0, 16)
-    l1.TextXAlignment = Enum.TextXAlignment.Left
-    l1.BackgroundTransparency = 1
-    l1.Parent = card
-
-    local l2 = Instance.new("TextLabel")
-    l2.Text = desc
-    l2.Font = FONT_REG
-    l2.TextSize = 9
-    l2.TextColor3 = Theme.TextSub
-    l2.Position = UDim2.new(0, 10, 0, 26)
-    l2.Size = UDim2.new(1, -85, 0, 16)
-    l2.TextXAlignment = Enum.TextXAlignment.Left
-    l2.BackgroundTransparency = 1
-    l2.Parent = card
+    local lbl = Instance.new("TextLabel")
+    lbl.Text = title
+    lbl.Font = FONT_BOLD
+    lbl.TextSize = 9.5
+    lbl.TextColor3 = Theme.Text
+    lbl.Position = UDim2.new(0, 8, 0, 0)
+    lbl.Size = UDim2.new(1, -50, 1, 0)
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.BackgroundTransparency = 1
+    lbl.Parent = card
 
     local btn = Instance.new("TextButton")
     btn.Text = initialVal and "ON" or "OFF"
     btn.Font = FONT_BOLD
-    btn.TextSize = 11
+    btn.TextSize = 9
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
     btn.BackgroundColor3 = initialVal and Theme.Green or Theme.Danger
-    btn.Size = UDim2.new(0, 60, 0, 26)
-    btn.Position = UDim2.new(1, -70, 0.5, -13)
+    btn.Size = UDim2.new(0, 36, 0, 18)
+    btn.Position = UDim2.new(1, -42, 0.5, -9)
     btn.BorderSizePixel = 0
     btn.Parent = card
-    addCorner(5, btn)
+    addCorner(4, btn)
 
     local state = initialVal
     btn.MouseButton1Click:Connect(function()
@@ -833,65 +914,61 @@ local function createToggle(title, desc, initialVal, onToggle)
     return card
 end
 
--- Toggles
-createToggle("Auto Steal / Farm Telur", "Ambil & klaim semua telur di map otomatis", Settings.autoSteal, function(val)
+-- Toggles (Ringkas & Efisien)
+createToggle("Auto Steal Telur", Settings.autoSteal, function(val)
     Settings.autoSteal = val
 end)
 
-createToggle("Auto Hatch Telur", "Tetaskan telur otomatis untuk pet baru", Settings.autoHatch, function(val)
+createToggle("Auto Hatch Telur", Settings.autoHatch, function(val)
     Settings.autoHatch = val
 end)
 
-createToggle("Auto Server Hop", "Pindah server saat target tercapai / sepi", Settings.autoHop, function(val)
+createToggle("Smart Auto Hop", Settings.autoHop, function(val)
     Settings.autoHop = val
 end)
 
-createToggle("Extreme FPS Booster", "Hapus texture/particle agar hemat RAM & GPU", Settings.fpsBoost, function(val)
+createToggle("Extreme FPS Boost", Settings.fpsBoost, function(val)
     Settings.fpsBoost = val
     if val then applyFpsBoost() end
 end)
 
-createToggle("Auto Accept Friends", "Terima friend request untuk gift telur", Settings.autoAccept, function(val)
+createToggle("Auto Terima Teman", Settings.autoAccept, function(val)
     Settings.autoAccept = val
 end)
 
-createToggle("Auto Chat Broadcast", "Kirim pesan berkala di chat server", Settings.autoChat, function(val)
+createToggle("Auto Broadcast Chat", Settings.autoChat, function(val)
     Settings.autoChat = val
 end)
 
-createToggle("Camera Lock (Top-Down)", "Kunci POV atas karakter saat AFK", Settings.camLock, function(val)
+createToggle("Camera POV Lock", Settings.camLock, function(val)
     Settings.camLock = val
 end)
 
 -- Button Manual Hop
 local HopNowCard = Instance.new("Frame")
-HopNowCard.Size = UDim2.new(1, 0, 0, 42)
+HopNowCard.Size = UDim2.new(1, 0, 0, 28)
 HopNowCard.BackgroundColor3 = Theme.Card
 HopNowCard.BorderSizePixel = 0
 HopNowCard.Parent = Scroll
-addCorner(6, HopNowCard)
+addCorner(5, HopNowCard)
 
 local HopBtn = Instance.new("TextButton")
-HopBtn.Text = "🚀 PINDAH SERVER SEKARANG"
+HopBtn.Text = "🚀 PINDAH SERVER"
 HopBtn.Font = FONT_BOLD
-HopBtn.TextSize = 11
+HopBtn.TextSize = 9.5
 HopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 HopBtn.BackgroundColor3 = Theme.AccentDim
-HopBtn.Size = UDim2.new(1, -16, 0, 28)
-HopBtn.Position = UDim2.new(0, 8, 0, 7)
+HopBtn.Size = UDim2.new(1, -12, 0, 20)
+HopBtn.Position = UDim2.new(0, 6, 0, 4)
 HopBtn.BorderSizePixel = 0
 HopBtn.Parent = HopNowCard
-addCorner(5, HopBtn)
+addCorner(4, HopBtn)
 
 HopBtn.MouseButton1Click:Connect(function()
-    HopBtn.Text = "Mencari server..."
     task.spawn(function()
-        local ok = doServerHop()
-        if not ok then
-            HopBtn.Text = "Gagal (Coba Lagi)"
-            task.wait(2)
-            HopBtn.Text = "🚀 PINDAH SERVER SEKARANG"
-        end
+        doServerHop(function(status)
+            HopBtn.Text = status
+        end)
     end)
 end)
 
@@ -899,8 +976,12 @@ end)
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.KeyCode == Enum.KeyCode.RightShift and ScreenGui.Parent then
-        Window.Visible = not Window.Visible
+        if Window.Visible then
+            setMinimized(true)
+        else
+            setMinimized(false)
+        end
     end
 end)
 
-print("[Yancok] Steal An Egg standalone siap! Tekan [RightShift] untuk sembunyikan UI.")
+print("[Yancok] UI ringkas & Server Hopper siap! Tekan [RightShift] untuk minimize/restore.")
