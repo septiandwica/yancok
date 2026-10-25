@@ -20,6 +20,16 @@ local SCRIPT_ID = "__YANCOK_STEAL_AN_EGG"
 local RUN_ID = os.clock()
 getgenv()[SCRIPT_ID] = RUN_ID
 
+-- Notifikasi awal saat execute di Delta (Memberi jeda agar game stabil sebelum panel dimuat)
+pcall(function()
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "Yancok Hub",
+        Text = "Script berhasil di-execute! Memuat modul...",
+        Duration = 3,
+    })
+end)
+task.wait(1.8)
+
 -- ============================ GITHUB URL CONFIG ============================
 local GITHUB_USER = "septiandwica"
 local GITHUB_REPO = "yancok"
@@ -46,39 +56,35 @@ local PLACE_ID    = game.PlaceId
 local CURRENT_JOB = game.JobId
 
 -- ============================ CONTAINER PROTEKSI ============================
--- Prioritaskan HUI (Hidden UI) atau CoreGui agar luput dari scan PlayerGui
+-- Prioritaskan HUI (Hidden UI) dari Delta executor agar 100% luput dari scan PlayerGui
 local GuiParent = nil
 pcall(function()
-    if gethui then
-        GuiParent = gethui()
-    elseif game:GetService("CoreGui") then
-        GuiParent = game:GetService("CoreGui")
+    if type(gethui) == "function" then
+        local ok, h = pcall(gethui)
+        if ok and h then GuiParent = h end
     end
 end)
 if not GuiParent then
-    GuiParent = LocalPlayer:WaitForChild("PlayerGui")
+    pcall(function()
+        if type(get_hidden_gui) == "function" then
+            local ok, h = pcall(get_hidden_gui)
+            if ok and h then GuiParent = h end
+        end
+    end)
+end
+if not GuiParent then
+    pcall(function()
+        GuiParent = game:GetService("CoreGui")
+    end)
+end
+if not GuiParent then
+    GuiParent = LocalPlayer:FindFirstChildOfClass("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui")
 end
 
--- Bersihkan instance GUI lama secara bersih tanpa jejak nama
+-- Bersihkan instance GUI lama secara bersih
 if getgenv().__YANCOK_GUI then
     pcall(function() getgenv().__YANCOK_GUI:Destroy() end)
     getgenv().__YANCOK_GUI = nil
-end
-
-do
-    local roots = { GuiParent, LocalPlayer:FindFirstChildOfClass("PlayerGui") }
-    pcall(function() roots[#roots + 1] = game:GetService("CoreGui") end)
-    local cleaned = {}
-    for _, root in ipairs(roots) do
-        if root and not cleaned[root] then
-            cleaned[root] = true
-            for _, child in ipairs(root:GetChildren()) do
-                if child.Name == "YancokEgg_UI" or child.Name == "YancokEgg_Panel" or child:GetAttribute("YancokPanel") then
-                    pcall(function() child:Destroy() end)
-                end
-            end
-        end
-    end
 end
 
 -- ============================== TEMA & WARNA ===============================
@@ -886,16 +892,22 @@ end)
 -- ================================= GUI PANEL ================================
 -- Layout Horizontal 2-Kolom Berbasis Tab (Super Rapih, Modern, Posisi Tengah Layar)
 local ScreenGui = Instance.new("ScreenGui")
-local randomTag = string.sub(HttpService:GenerateGUID(false):gsub("-", ""), 1, 8)
-ScreenGui.Name = "RobloxGui_" .. randomTag
-ScreenGui:SetAttribute("YancokPanel", true)
+local randomTag = string.sub(HttpService:GenerateGUID(false):gsub("-", ""), 1, 6)
+ScreenGui.Name = "App_" .. randomTag
 ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
+-- PROTEKSI GUI MULTI-EXECUTOR (Delta / KRNL / Synapse) SEBELUM PARENTING:
 pcall(function()
-    if syn and syn.protect_gui then
+    if type(protectgui) == "function" then
+        protectgui(ScreenGui)
+    elseif type(protect_gui) == "function" then
+        protect_gui(ScreenGui)
+    elseif syn and type(syn.protect_gui) == "function" then
         syn.protect_gui(ScreenGui)
     end
 end)
+
 ScreenGui.Parent = GuiParent
 getgenv().__YANCOK_GUI = ScreenGui
 
@@ -915,27 +927,59 @@ local function addStroke(col, th, p)
     return s
 end
 
--- =========================== TOP CENTER OVERLAY HUD =========================
-local OverlayHud = Instance.new("Frame")
-OverlayHud.Name = "StatusOverlay"
-OverlayHud.AnchorPoint = Vector2.new(0.5, 0)
-OverlayHud.Position = UDim2.new(0.5, 0, 0, 6)
-OverlayHud.Size = UDim2.new(0, 240, 0, 20)
-OverlayHud.BackgroundColor3 = Theme.Header
-OverlayHud.BackgroundTransparency = 0.2
-OverlayHud.BorderSizePixel = 0
-OverlayHud.Parent = ScreenGui
-addCorner(10, OverlayHud)
-addStroke(Theme.Accent, 1, OverlayHud)
+-- ===================== FLOATING MOBILE TOGGLE ICON (DELTA / TOUCH) =====================
+-- Tombol sentuh bulat di tepi layar agar user mobile / Delta bisa buka/tutup menu
+local MobileToggle = Instance.new("TextButton")
+MobileToggle.Name = "BtnToggle"
+MobileToggle.Size = UDim2.new(0, 38, 0, 38)
+MobileToggle.Position = UDim2.new(0, 14, 0.5, -19)
+MobileToggle.BackgroundColor3 = Theme.Header
+MobileToggle.BackgroundTransparency = 0.15
+MobileToggle.BorderSizePixel = 0
+MobileToggle.Text = "🥚"
+MobileToggle.TextSize = 20
+MobileToggle.TextColor3 = Theme.Accent
+MobileToggle.Parent = ScreenGui
+addCorner(19, MobileToggle)
+addStroke(Theme.Accent, 1.5, MobileToggle)
 
-local OverlayLbl = Instance.new("TextLabel")
-OverlayLbl.Text = "⚡ YANCOK: 0 TELUR TERCURI"
-OverlayLbl.Font = FONT_BOLD
-OverlayLbl.TextSize = 9.5
-OverlayLbl.TextColor3 = Theme.Text
-OverlayLbl.Size = UDim2.new(1, 0, 1, 0)
-OverlayLbl.BackgroundTransparency = 1
-OverlayLbl.Parent = OverlayHud
+-- Dragging untuk Mobile Toggle Icon
+do
+    local dragging = false
+    local dragInput, dragStart, startPos
+
+    MobileToggle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = MobileToggle.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    MobileToggle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            MobileToggle.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
 
 -- =========================== FLOATING MINI BADGE ============================
 local MiniBar = Instance.new("Frame")
@@ -1631,31 +1675,26 @@ end)
 -- Tab default pertama
 showTab("Farm Telur")
 
--- Update Overlay Loop
-task.spawn(function()
-    while getgenv()[SCRIPT_ID] == RUN_ID do
-        task.wait(1)
-        if OverlayLbl and OverlayLbl.Parent then
-            if Settings.autoHop and hopCountLbl and hopCountLbl.Text ~= "hop off" then
-                OverlayLbl.Text = "⚡ " .. string.upper(hopCountLbl.Text)
-            else
-                OverlayLbl.Text = "⚡ YANCOK: " .. tostring(totalClaims) .. " TELUR TERCURI"
-            end
-        end
-    end
+-- Hubungkan Mobile Toggle Icon (Sentuh layar di Delta / Mobile)
+MobileToggle.MouseButton1Click:Connect(function()
+    Window.Visible = not Window.Visible
 end)
 
--- Toggle Shortcut Keyboard (RightShift) — Full Stealth Mode
+-- Toggle Shortcut Keyboard (RightShift jika di PC)
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.KeyCode == Enum.KeyCode.RightShift and ScreenGui.Parent then
-        local newState = not Window.Visible
-        Window.Visible = newState
-        OverlayHud.Visible = newState
-        if not newState then
-            MiniBar.Visible = false
-        end
+        Window.Visible = not Window.Visible
     end
 end)
 
-print("[Yancok Stealth] Script aktif dengan proteksi Anti-Cheat! Tekan [RightShift] untuk sembunyikan/tampilkan seluruh UI.")
+-- Notifikasi bahwa script telah siap digunakan
+pcall(function()
+    StarterGui:SetCore("SendNotification", {
+        Title = "Yancok Siap",
+        Text = "Menu aktif! Ketuk tombol icon 🥚 di layar untuk buka/tutup menu.",
+        Duration = 4,
+    })
+end)
+
+print("[Yancok Stealth] Script aktif dengan proteksi Anti-Cheat! Ketuk tombol 🥚 atau tekan [RightShift] untuk buka/tutup menu.")
