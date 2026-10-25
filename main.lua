@@ -261,8 +261,8 @@ local function moveToTarget(targetPos, stopDist)
     if dist <= stopDist then return true end
 
     local rawMode = tostring(Settings.movementMode or "Safe Walk")
-    local isSmoothGlide = rawMode:find("Smooth Glide") ~= nil
-    local isInstant = rawMode:find("Instant CFrame") ~= nil
+    local isSmoothGlide = rawMode:find("Smooth Glide") ~= nil or rawMode:find("Meluncur") ~= nil
+    local isInstant = rawMode:find("Instant CFrame") ~= nil or rawMode:find("Teleport") ~= nil
 
     if not isSmoothGlide and not isInstant then
         -- 100% Menggunakan Navigasi Fisik Humanoid Roblox Asli (Tidak memicu delta CFrame, bebas BAC-3515 & BAC-4515)
@@ -747,14 +747,14 @@ task.spawn(function()
 
         if Settings.autoHop and not hopping then
             local ready = false
-            local mode = Settings.hopWhen or "Any"
-            if mode == "Interval" then
+            local mode = tostring(Settings.hopWhen or "Any")
+            if mode == "Interval" or mode:find("Waktu") then
                 ready = (elapsedSec >= (Settings.hopInterval or 12) * 60)
-            elseif mode == "After Steal Count" then
+            elseif mode == "After Steal Count" or mode:find("Target") then
                 ready = (claimsGained >= (Settings.hopSteals or 40))
-            elseif mode == "No Match" then
+            elseif mode == "No Match" or mode:find("Telur") then
                 ready = (claimsGained > 0 or elapsedSec > 90) and (noMatchSec >= (Settings.hopNoMatchDelay or 60))
-            else -- Any
+            else -- Any / Bebas
                 ready = (elapsedSec >= (Settings.hopInterval or 12) * 60)
                      or (claimsGained >= (Settings.hopSteals or 40))
                      or ((claimsGained > 0 or elapsedSec > 90) and noMatchSec >= (Settings.hopNoMatchDelay or 60))
@@ -1510,20 +1510,20 @@ local function button(parent, label, onClick)
 end
 
 -- ===================== SUSUNAN HALAMAN MENU (5 TAB LENGKAP) =================
--- TAB 1: Farm Telur & Stealth
-local farmL, farmR = makePage("Farm Telur", 1)
-section(farmL, "Auto Steal Telur")
-toggle(farmL, "Auto Steal Telur", "autoSteal")
-dropdown(farmL, "Metode Gerak (Anti-Cheat)", "movementMode", { "Safe Walk (Rekomendasi 100% Anti-BAC)", "Smooth Glide", "Instant CFrame" })
-toggle(farmL, "Mode Stealth (Anti-Deteksi)", "safeMode")
-slider(farmL, "Jeda Ambil Telur (s)", "stealDelay", 0.1, 1.5, 0.05)
-slider(farmL, "Jarak Maksimal (m)", "maxDistance", 50, 600, 25)
+-- TAB 1: Ambil Telur
+local farmL, farmR = makePage("🥚 Telur", 1)
+section(farmL, "Ambil Telur Otomatis")
+toggle(farmL, "Ambil Telur Otomatis", "autoSteal")
+dropdown(farmL, "Cara Jalan Karakter", "movementMode", { "Jalan Santai (Paling Aman)", "Meluncur Mulus", "Teleport Kilat" })
+toggle(farmL, "Mode Halus (Anti-Cheat)", "safeMode")
+slider(farmL, "Jeda Ambil Telur (detik)", "stealDelay", 0.1, 1.5, 0.05)
+slider(farmL, "Jarak Telur Terjauh", "maxDistance", 50, 600, 25)
 
-section(farmR, "Auto Hatch & Klaim")
-toggle(farmR, "Auto Hatch (Di Dekat Stand)", "autoHatch")
-dropdown(farmR, "Jumlah Sekali Hatch", "hatchAmount", { 1, 3, 8 })
+section(farmR, "Buka Telur (Hatch)")
+toggle(farmR, "Buka Telur Otomatis", "autoHatch")
+dropdown(farmR, "Sekali Buka Berapa Telur", "hatchAmount", { 1, 3, 8 })
 
-section(farmR, "Statistik Farm")
+section(farmR, "Hasil Panen")
 local ClaimsCard = Instance.new("Frame")
 ClaimsCard.Size = UDim2.new(1, -4, 0, 34)
 ClaimsCard.BackgroundColor3 = Theme.Card
@@ -1534,7 +1534,7 @@ addCorner(5, ClaimsCard)
 addStroke(Theme.Border, 1, ClaimsCard)
 
 local EggCountLbl = Instance.new("TextLabel")
-EggCountLbl.Text = "Telur Terklaim: 0"
+EggCountLbl.Text = "Telur Terkumpul: 0"
 EggCountLbl.Font = FONT_BOLD
 EggCountLbl.TextSize = 11
 EggCountLbl.TextColor3 = Theme.Green
@@ -1545,7 +1545,7 @@ EggCountLbl.BackgroundTransparency = 1
 EggCountLbl.Parent = ClaimsCard
 
 local EggRateLbl = Instance.new("TextLabel")
-EggRateLbl.Text = "Status: 100% Standalone | Bebas Key"
+EggRateLbl.Text = "Status: Aktif & Siap Panen"
 EggRateLbl.Font = FONT_REG
 EggRateLbl.TextSize = 9
 EggRateLbl.TextColor3 = Theme.TextSub
@@ -1558,26 +1558,26 @@ EggRateLbl.Parent = ClaimsCard
 task.spawn(function()
     while getgenv()[SCRIPT_ID] == RUN_ID do
         task.wait(1)
-        EggCountLbl.Text = "Telur Terklaim: " .. tostring(totalClaims)
+        EggCountLbl.Text = "Telur Terkumpul: " .. tostring(totalClaims)
         MiniLabel.Text = "🔥 Yancok: " .. tostring(totalClaims) .. " ⚡"
     end
 end)
 
--- TAB 2: Server Hop (Persis Nasi Rendang)
-local hopL, hopR = makePage("Server Hop", 2)
-section(hopL, "Trigger Pindah Server")
-toggle(hopL, "Auto Server Hop", "autoHop")
-dropdown(hopL, "Hop When", "hopWhen", { "Any", "After Steal Count", "Interval", "No Match" })
-slider(hopL, "No Match Delay (s)", "hopNoMatchDelay", 5, 180, 5)
-slider(hopL, "Hop Interval (min)", "hopInterval", 1, 60, 1)
-slider(hopL, "Steals Target", "hopSteals", 10, 200, 5)
+-- TAB 2: Pindah Server
+local hopL, hopR = makePage("🚀 Pindah", 2)
+section(hopL, "Kapan Pindah Server?")
+toggle(hopL, "Pindah Server Otomatis", "autoHop")
+dropdown(hopL, "Pindah Kalau", "hopWhen", { "Bebas / Kapan Saja", "Target Tercapai", "Waktu Habis", "Telur Habis" })
+slider(hopL, "Tunggu Telur Baru (detik)", "hopNoMatchDelay", 5, 180, 5)
+slider(hopL, "Lama di Server (menit)", "hopInterval", 1, 60, 1)
+slider(hopL, "Target Jumlah Telur", "hopSteals", 10, 200, 5)
 
-section(hopR, "Target Server")
-slider(hopR, "Min Player (0=off)", "hopMinPlayers", 0, 20, 1)
-slider(hopR, "Max Player (0=off)", "hopMaxPlayers", 0, 20, 1)
-toggle(hopR, "Prefer Server Paling Sepi", "hopPreferEmpty")
+section(hopR, "Pilih Server")
+slider(hopR, "Minimal Pemain", "hopMinPlayers", 0, 20, 1)
+slider(hopR, "Maksimal Pemain", "hopMaxPlayers", 0, 20, 1)
+toggle(hopR, "Pilih Server Paling Sepi", "hopPreferEmpty")
 
-button(hopR, "🚀 Hop Server Sekarang", function()
+button(hopR, "🚀 Pindah Server Sekarang", function()
     doServerHop(function(s)
         if hopCountLbl then hopCountLbl.Text = s end
     end)
@@ -1614,11 +1614,11 @@ statusLbl.TextSize = 9
 statusLbl.TextXAlignment = Enum.TextXAlignment.Left
 statusLbl.Parent = StatCard
 
--- TAB 3: Auto Chat (Persis Nasi Rendang)
-local chatL, chatR = makePage("Auto Chat", 3)
-section(chatL, "Broadcast Chat Otomatis")
-toggle(chatL, "Auto Send Chat", "autoChat")
-slider(chatL, "Interval Chat (s)", "chatInterval", 5, 300, 5)
+-- TAB 3: Auto Chat
+local chatL, chatR = makePage("💬 Chat", 3)
+section(chatL, "Kirim Chat Sendiri")
+toggle(chatL, "Kirim Chat Otomatis", "autoChat")
+slider(chatL, "Jeda Kirim Chat (detik)", "chatInterval", 5, 300, 5)
 
 local ChatStatusCard = Instance.new("Frame")
 ChatStatusCard.Size = UDim2.new(1, -4, 0, 24)
@@ -1640,18 +1640,18 @@ chatCountLbl.TextSize = 9.5
 chatCountLbl.TextXAlignment = Enum.TextXAlignment.Left
 chatCountLbl.Parent = ChatStatusCard
 
-section(chatR, "Pesan (Rotasi Anti-Spam)")
+section(chatR, "Isi Pesan Chat")
 textbox(chatR, "Pesan 1", "chatText")
 textbox(chatR, "Pesan 2", "chatText2")
 textbox(chatR, "Pesan 3", "chatText3")
 
--- TAB 4: Kamera POV (Persis Nasi Rendang)
-local camL, camR = makePage("Kamera POV", 4)
-section(camL, "Sudut Kamera AFK")
-toggle(camL, "Kunci Sudut Kamera", "camLock")
+-- TAB 4: Kamera
+local camL, camR = makePage("📹 Kamera", 4)
+section(camL, "Kunci Pandangan")
+toggle(camL, "Kunci Kamera Dari Atas", "camLock")
 
 local updCamX, updCamY, updCamZ, updCamFov
-button(camL, "📸 Ambil Sudut POV Saat Ini", function()
+button(camL, "📸 Kunci Posisi Kamera Sekarang", function()
     local chr = LocalPlayer.Character
     local r = chr and chr:FindFirstChild("HumanoidRootPart")
     local c = Workspace.CurrentCamera
@@ -1667,26 +1667,26 @@ button(camL, "📸 Ambil Sudut POV Saat Ini", function()
     end
 end)
 
-section(camR, "Offset & Zoom")
-updCamX = slider(camR, "Offset X", "camOffX", -200, 200, 1)
-updCamY = slider(camR, "Offset Y", "camOffY", -100, 200, 1)
-updCamZ = slider(camR, "Offset Z", "camOffZ", -200, 200, 1)
-updCamFov = slider(camR, "FOV Kamera", "camFov", 30, 120, 1)
+section(camR, "Atur Posisi Kamera")
+updCamX = slider(camR, "Geser Kiri/Kanan", "camOffX", -200, 200, 1)
+updCamY = slider(camR, "Tinggi Kamera", "camOffY", -100, 200, 1)
+updCamZ = slider(camR, "Maju/Mundur", "camOffZ", -200, 200, 1)
+updCamFov = slider(camR, "Zoom Kamera (FOV)", "camFov", 30, 120, 1)
 
--- TAB 5: Misc & FPS
-local miscL, miscR = makePage("Misc & FPS", 5)
-section(miscL, "Performa & Hemat Resource")
-toggle(miscL, "Extreme FPS Booster", "fpsBoost")
-toggle(miscL, "Anti-AFK (Anti Kick 20 Menit)", "antiAfk")
+-- TAB 5: Anti-Lag & AFK
+local miscL, miscR = makePage("⚡ Anti-Lag", 5)
+section(miscL, "Biar Lancar & Enteng")
+toggle(miscL, "Anti Lag (Hapus Efek Berat)", "fpsBoost")
+toggle(miscL, "Anti-Kick 20 Menit (Bisa Ditinggal)", "antiAfk")
 
-section(miscR, "Pertemanan & Rejoin")
-toggle(miscR, "Auto Terima Pertemanan", "autoAcceptFriends")
-button(miscR, "🔄 Rejoin Server Ini", function()
+section(miscR, "Teman & Masuk Ulang")
+toggle(miscR, "Otomatis Terima Teman", "autoAcceptFriends")
+button(miscR, "🔄 Masuk Ulang Server Ini", function()
     pcall(function() TeleportService:TeleportToPlaceInstance(PLACE_ID, CURRENT_JOB, LocalPlayer) end)
 end)
 
 -- Tab default pertama
-showTab("Farm Telur")
+showTab("🥚 Telur")
 
 -- Hubungkan Mobile Toggle Icon (Sentuh layar di Delta / Mobile)
 MobileToggle.MouseButton1Click:Connect(function()
