@@ -20,16 +20,6 @@ local SCRIPT_ID = "__YANCOK_STEAL_AN_EGG"
 local RUN_ID = os.clock()
 getgenv()[SCRIPT_ID] = RUN_ID
 
--- Notifikasi awal saat execute di Delta (Memberi jeda agar game stabil sebelum panel dimuat)
-pcall(function()
-    game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title = "Yancok Hub",
-        Text = "Script berhasil di-execute! Memuat modul...",
-        Duration = 3,
-    })
-end)
-task.wait(1.8)
-
 -- ============================ GITHUB URL CONFIG ============================
 local GITHUB_USER = "septiandwica"
 local GITHUB_REPO = "yancok"
@@ -48,38 +38,22 @@ local TeleportService    = game:GetService("TeleportService")
 local Lighting           = game:GetService("Lighting")
 local Workspace          = game:GetService("Workspace")
 local ReplicatedStorage  = game:GetService("ReplicatedStorage")
-local StarterGui         = game:GetService("StarterGui")
-local PathfindingService = game:GetService("PathfindingService")
 
 local LocalPlayer = Players.LocalPlayer
 local PLACE_ID    = game.PlaceId
 local CURRENT_JOB = game.JobId
 
 -- ============================ CONTAINER PROTEKSI ============================
--- Prioritaskan HUI (Hidden UI) dari Delta executor agar 100% luput dari scan PlayerGui
-local GuiParent = nil
+-- Prioritaskan gethui() Delta jika bukan CoreGui (CoreGui menyebabkan crash / force close di mobile)
+local CoreParent = LocalPlayer:WaitForChild("PlayerGui")
 pcall(function()
     if type(gethui) == "function" then
         local ok, h = pcall(gethui)
-        if ok and h then GuiParent = h end
+        if ok and h and h ~= game:FindService("CoreGui") then
+            CoreParent = h
+        end
     end
 end)
-if not GuiParent then
-    pcall(function()
-        if type(get_hidden_gui) == "function" then
-            local ok, h = pcall(get_hidden_gui)
-            if ok and h then GuiParent = h end
-        end
-    end)
-end
-if not GuiParent then
-    pcall(function()
-        GuiParent = game:GetService("CoreGui")
-    end)
-end
-if not GuiParent then
-    GuiParent = LocalPlayer:FindFirstChildOfClass("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui")
-end
 
 -- Bersihkan instance GUI lama secara bersih
 if getgenv().__YANCOK_GUI then
@@ -196,26 +170,7 @@ local function registerClaim()
     lastClaimTime = os.clock()
 end
 
--- Deteksi pasif remote klaim telur (Hanya mendengarkan event yang tiba secara alami)
-do
-    pcall(function()
-        local net = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Networking")
-        if net then
-            for _, c in ipairs(net:GetChildren()) do
-                if c:IsA("RemoteEvent") then
-                    local n = string.lower(c.Name)
-                    if string.find(n, "egg") or string.find(n, "redeem") or string.find(n, "claim") then
-                        c.OnClientEvent:Connect(function(res)
-                            if res == nil or res == true or (type(res) == "table" and res.Ok ~= false) then
-                                registerClaim()
-                            end
-                        end)
-                    end
-                end
-            end
-        end
-    end)
-end
+-- Pelacakan klaim telur murni via trigger aksi stealEgg (100% bebas dari hook remote network yang memicu BAC)
 
 -- ==================== NATIVE STEAL & EGG ENGINE (100% CLEAN) ===================
 -- 100% Native Luau: Tanpa holy.lua, tanpa key, dan bebas dari dependensi nrlscript
@@ -309,7 +264,8 @@ local function moveToTarget(targetPos, stopDist)
         -- 2. Jarak sedang / jauh: Gunakan PathfindingService agar belok menghindari tembok, pagar & rintangan
         local path = nil
         local pathOk = pcall(function()
-            path = PathfindingService:CreatePath({
+            local pfs = game:GetService("PathfindingService")
+            path = pfs:CreatePath({
                 AgentRadius = 2.0,
                 AgentHeight = 5.0,
                 AgentCanJump = true,
@@ -447,6 +403,9 @@ local function stealEgg(eggObj)
             end
         end
     end)
+    if success then
+        registerClaim()
+    end
     return success
 end
 
@@ -807,25 +766,7 @@ task.spawn(function()
     end
 end)
 
--- =========================== AUTO CHAT & AUTO ACCEPT ========================
--- Auto Accept Friends
-do
-    pcall(function()
-        local net = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Networking")
-        if net then
-            for _, c in ipairs(net:GetChildren()) do
-                if c:IsA("RemoteEvent") and string.find(string.lower(c.Name), "friend") then
-                    c.OnClientEvent:Connect(function(plr)
-                        if Settings.autoAcceptFriends and typeof(plr) == "Instance" and plr:IsA("Player") then
-                            pcall(function() StarterGui:SetCore("PromptSendFriendRequest", plr) end)
-                        end
-                    end)
-                end
-            end
-        end
-    end)
-end
-
+-- =========================== AUTO CHAT =====================================
 -- Auto Chat Loop
 local chatCountLbl
 task.spawn(function()
@@ -865,13 +806,18 @@ task.spawn(function()
     end
 end)
 
--- Anti-AFK Protection
+-- Anti-AFK Protection (Safe: Tanpa VirtualUser yang memicu blacklist BAC)
 pcall(function()
-    local VirtualUser = game:GetService("VirtualUser")
     LocalPlayer.Idled:Connect(function()
         if Settings.antiAfk then
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new())
+            pcall(function()
+                local vim = game:GetService("VirtualInputManager")
+                if vim then
+                    vim:SendKeyEvent(true, Enum.KeyCode.RightControl, false, game)
+                    task.wait(0.05)
+                    vim:SendKeyEvent(false, Enum.KeyCode.RightControl, false, game)
+                end
+            end)
         end
     end)
 end)
@@ -895,20 +841,10 @@ local ScreenGui = Instance.new("ScreenGui")
 local randomTag = string.sub(HttpService:GenerateGUID(false):gsub("-", ""), 1, 6)
 ScreenGui.Name = "App_" .. randomTag
 ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
--- PROTEKSI GUI MULTI-EXECUTOR (Delta / KRNL / Synapse) SEBELUM PARENTING:
-pcall(function()
-    if type(protectgui) == "function" then
-        protectgui(ScreenGui)
-    elseif type(protect_gui) == "function" then
-        protect_gui(ScreenGui)
-    elseif syn and type(syn.protect_gui) == "function" then
-        syn.protect_gui(ScreenGui)
-    end
-end)
-
-ScreenGui.Parent = GuiParent
+ScreenGui.DisplayOrder = 1000
+ScreenGui.Parent = CoreParent
 getgenv().__YANCOK_GUI = ScreenGui
 
 local function addCorner(r, p)
@@ -1011,6 +947,60 @@ MiniBtn.BackgroundTransparency = 1
 MiniBtn.Text = ""
 MiniBtn.Parent = MiniBar
 
+-- =========================== IN-GAME TOAST NOTIFICATIONS ======================
+local ToastContainer = Instance.new("Frame")
+ToastContainer.Name = "Toasts"
+ToastContainer.AnchorPoint = Vector2.new(0.5, 0)
+ToastContainer.Position = UDim2.new(0.5, 0, 0, 14)
+ToastContainer.Size = UDim2.new(0, 340, 0, 0)
+ToastContainer.BackgroundTransparency = 1
+ToastContainer.Parent = ScreenGui
+
+local function showToast(title, desc, dur)
+    pcall(function()
+        local toast = Instance.new("Frame")
+        toast.Size = UDim2.new(1, 0, 0, 46)
+        toast.BackgroundColor3 = Theme.Header
+        toast.BackgroundTransparency = 0.1
+        toast.BorderSizePixel = 0
+        toast.Parent = ToastContainer
+        addCorner(8, toast)
+        addStroke(Theme.Accent, 1.2, toast)
+
+        local tLbl = Instance.new("TextLabel")
+        tLbl.Text = title
+        tLbl.Font = FONT_BOLD
+        tLbl.TextSize = 12
+        tLbl.TextColor3 = Theme.Accent
+        tLbl.Position = UDim2.new(0, 12, 0, 5)
+        tLbl.Size = UDim2.new(1, -24, 0, 16)
+        tLbl.BackgroundTransparency = 1
+        tLbl.TextXAlignment = Enum.TextXAlignment.Left
+        tLbl.Parent = toast
+
+        local dLbl = Instance.new("TextLabel")
+        dLbl.Text = desc
+        dLbl.Font = FONT_REG
+        dLbl.TextSize = 11
+        dLbl.TextColor3 = Theme.TextSub
+        dLbl.Position = UDim2.new(0, 12, 0, 23)
+        dLbl.Size = UDim2.new(1, -24, 0, 16)
+        dLbl.BackgroundTransparency = 1
+        dLbl.TextXAlignment = Enum.TextXAlignment.Left
+        dLbl.Parent = toast
+
+        task.delay(dur or 4, function()
+            if toast and toast.Parent then
+                TweenService:Create(toast, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+                TweenService:Create(tLbl, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
+                TweenService:Create(dLbl, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
+                task.wait(0.32)
+                if toast and toast.Parent then toast:Destroy() end
+            end
+        end)
+    end)
+end
+
 -- =========================== MAIN WINDOW (CENTERED & COMPACT) =========================
 local WIN_W, WIN_H = 540, 255
 local Window = Instance.new("Frame")
@@ -1021,6 +1011,7 @@ Window.Size = UDim2.new(0, WIN_W, 0, WIN_H)
 Window.BackgroundColor3 = Theme.Background
 Window.BorderSizePixel = 0
 Window.Active = true
+Window.Visible = false -- Mulai tertutup agar tidak memicu scan overlay dan layar tetap bersih saat execute
 Window.Parent = ScreenGui
 addCorner(10, Window)
 addStroke(Theme.Accent, 1.2, Window)
@@ -1688,13 +1679,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     end
 end)
 
--- Notifikasi bahwa script telah siap digunakan
-pcall(function()
-    StarterGui:SetCore("SendNotification", {
-        Title = "Yancok Siap",
-        Text = "Menu aktif! Ketuk tombol icon 🥚 di layar untuk buka/tutup menu.",
-        Duration = 4,
-    })
-end)
+-- Notifikasi in-game bersih saat execute (Semua toggle OFF, siap diklik)
+showToast("🥚 Yancok Berhasil Dimuat", "Semua fitur OFF. Ketuk tombol 🥚 di layar untuk membuka menu.", 5)
 
 print("[Yancok Stealth] Script aktif dengan proteksi Anti-Cheat! Ketuk tombol 🥚 atau tekan [RightShift] untuk buka/tutup menu.")
