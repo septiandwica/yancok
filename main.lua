@@ -94,32 +94,41 @@ local CFG_FOLDER = "Yancok_StealAnEgg"
 local CFG_PATH   = CFG_FOLDER .. "/config.json"
 
 local Settings = {
-    autoSteal       = true,               -- Auto farm & ambil telur di map
-    stealDelay      = 0.18,               -- Kecepatan delay antar klaim telur (detik)
-    autoHatch       = true,               -- Auto tetaskan telur
+    -- 1. Farm Telur
+    autoSteal         = true,
+    stealDelay        = 0.15,
+    autoHatch         = true,
+    hatchAmount       = 1,
+    autoTeleport      = true,
 
-    autoHop         = true,
-    hopMode         = "Any",              -- "Interval" | "After Steals" | "No Match" | "Any"
-    hopInterval     = 12,                 -- menit
-    hopSteals       = 40,                 -- klaim telur
-    hopNoMatchDelay = 60,                 -- detik tanpa klaim telur
-    hopMinPlayers   = 3,
-    hopMaxPlayers   = 6,
-    hopPreferEmpty  = true,
+    -- 2. Server Hop (Identik Nasi Rendang)
+    autoHop           = true,
+    hopWhen           = "Any",              -- "Any" | "After Steal Count" | "Interval" | "No Match"
+    hopNoMatchDelay   = 60,                 -- detik tanpa klaim telur
+    hopInterval       = 12,                 -- menit
+    hopSteals         = 40,                 -- klaim telur
+    hopMinPlayers     = 3,                  -- min pemain (0 = off)
+    hopMaxPlayers     = 6,                  -- max pemain (0 = off)
+    hopPreferEmpty    = true,               -- prefer server sepi
 
-    autoChat        = false,
-    chatInterval    = 25,
-    chatText1       = "Yancok Steal An Egg - 100% Keyless!",
-    chatText2       = "Farming Eggs AFK",
-    chatText3       = "",
+    -- 3. Auto Chat (Identik Nasi Rendang)
+    autoChat          = false,
+    chatInterval      = 25,
+    chatText          = "Yancok Steal An Egg - 100% Free & Keyless!",
+    chatText2         = "Farming Eggs AFK",
+    chatText3         = "",
 
-    fpsBoost        = true,               -- default aktif agar sangat hemat resource
-    autoAccept      = true,
-    camLock         = false,
-    camOffX         = 0,
-    camOffY         = 35,
-    camOffZ         = 0,
-    camFov          = 70,
+    -- 4. Camera (Identik Nasi Rendang)
+    camLock           = false,
+    camOffX           = 0,
+    camOffY           = 35,
+    camOffZ           = 0,
+    camFov            = 70,
+
+    -- 5. Misc & FPS (Identik Nasi Rendang)
+    fpsBoost          = true,
+    autoAcceptFriends = true,
+    antiAfk           = true,
 }
 
 local function saveConfig()
@@ -582,38 +591,56 @@ local function doServerHop(statusCallback)
     return true
 end
 
--- Loop pengecekan kondisi auto-hop
+-- ==================== LOOP PENGECEKAN KONDISI AUTO-HOP ====================
+local hopCountLbl, statusLbl
 task.spawn(function()
     local startTime = os.clock()
     hopBaseClaims = totalClaims
     while getgenv()[SCRIPT_ID] == RUN_ID do
-        task.wait(4)
-        if Settings.autoHop and not hopping then
-            local elapsedSec = os.clock() - startTime
-            local claimsGained = totalClaims - hopBaseClaims
-            local noMatchSec = os.clock() - lastClaimTime
+        task.wait(2)
+        local elapsedSec = os.clock() - startTime
+        local claimsGained = totalClaims - hopBaseClaims
+        local noMatchSec = os.clock() - lastClaimTime
 
+        if Settings.autoHop and not hopping then
             local ready = false
-            if Settings.hopMode == "Interval" then
-                ready = (elapsedSec >= Settings.hopInterval * 60)
-            elseif Settings.hopMode == "After Steals" then
-                ready = (claimsGained >= Settings.hopSteals)
-            elseif Settings.hopMode == "No Match" then
-                -- Jangan hop di No Match jika pemain baru join atau belum pernah claim
-                ready = (claimsGained > 0 or elapsedSec > 90) and (noMatchSec >= Settings.hopNoMatchDelay)
+            local mode = Settings.hopWhen or "Any"
+            if mode == "Interval" then
+                ready = (elapsedSec >= (Settings.hopInterval or 12) * 60)
+            elseif mode == "After Steal Count" then
+                ready = (claimsGained >= (Settings.hopSteals or 40))
+            elseif mode == "No Match" then
+                ready = (claimsGained > 0 or elapsedSec > 90) and (noMatchSec >= (Settings.hopNoMatchDelay or 60))
             else -- Any
-                ready = (elapsedSec >= Settings.hopInterval * 60)
-                     or (claimsGained >= Settings.hopSteals)
-                     or ((claimsGained > 0 or elapsedSec > 90) and noMatchSec >= Settings.hopNoMatchDelay)
+                ready = (elapsedSec >= (Settings.hopInterval or 12) * 60)
+                     or (claimsGained >= (Settings.hopSteals or 40))
+                     or ((claimsGained > 0 or elapsedSec > 90) and noMatchSec >= (Settings.hopNoMatchDelay or 60))
             end
 
             if ready then
-                local started = doServerHop()
+                local started = doServerHop(function(s)
+                    if hopCountLbl then hopCountLbl.Text = s end
+                end)
                 if started then
                     startTime = os.clock()
                     hopBaseClaims = totalClaims
                 end
             end
+        end
+
+        -- Update Countdown Labels
+        if hopCountLbl then
+            if Settings.autoHop then
+                local remain = math.max(0, math.ceil((Settings.hopInterval or 12) * 60 - elapsedSec))
+                local mins = math.floor(remain / 60)
+                local secs = remain % 60
+                hopCountLbl.Text = ("next hop in %d:%02d (%d/%d steals)"):format(mins, secs, claimsGained, Settings.hopSteals or 40)
+            else
+                hopCountLbl.Text = "hop off"
+            end
+        end
+        if statusLbl then
+            statusLbl.Text = ("claims: %d | total: %d"):format(claimsGained, totalClaims)
         end
     end
 end)
@@ -627,7 +654,7 @@ do
             for _, c in ipairs(net:GetChildren()) do
                 if c:IsA("RemoteEvent") and string.find(string.lower(c.Name), "friend") then
                     c.OnClientEvent:Connect(function(plr)
-                        if Settings.autoAccept and typeof(plr) == "Instance" and plr:IsA("Player") then
+                        if Settings.autoAcceptFriends and typeof(plr) == "Instance" and plr:IsA("Player") then
                             pcall(function() StarterGui:SetCore("PromptSendFriendRequest", plr) end)
                         end
                     end)
@@ -638,14 +665,15 @@ do
 end
 
 -- Auto Chat Loop
+local chatCountLbl
 task.spawn(function()
     local lastChat = 0
     local msgIndex = 0
     while getgenv()[SCRIPT_ID] == RUN_ID do
         task.wait(1)
-        if Settings.autoChat and (os.clock() - lastChat) >= math.max(10, Settings.chatInterval) then
+        if Settings.autoChat and (os.clock() - lastChat) >= math.max(5, Settings.chatInterval or 25) then
             local msgs = {}
-            for _, m in ipairs({ Settings.chatText1, Settings.chatText2, Settings.chatText3 }) do
+            for _, m in ipairs({ Settings.chatText, Settings.chatText2, Settings.chatText3 }) do
                 if type(m) == "string" and #m > 0 then msgs[#msgs + 1] = m end
             end
             if #msgs > 0 then
@@ -663,7 +691,27 @@ task.spawn(function()
                 end)
             end
         end
+
+        if chatCountLbl then
+            if Settings.autoChat then
+                local remain = math.max(0, math.ceil(math.max(5, Settings.chatInterval or 25) - (os.clock() - lastChat)))
+                chatCountLbl.Text = "next chat in " .. remain .. "s"
+            else
+                chatCountLbl.Text = "chat off"
+            end
+        end
     end
+end)
+
+-- Anti-AFK Protection
+pcall(function()
+    local VirtualUser = game:GetService("VirtualUser")
+    LocalPlayer.Idled:Connect(function()
+        if Settings.antiAfk then
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+        end
+    end)
 end)
 
 -- ============================ CAMERA LOCK POV ===============================
@@ -674,20 +722,21 @@ RunService.RenderStepped:Connect(function()
         if root then
             cam.CameraType = Enum.CameraType.Custom
             cam.FieldOfView = Settings.camFov or 70
-            cam.CFrame = CFrame.new(root.Position + Vector3.new(Settings.camOffX, Settings.camOffY, Settings.camOffZ), root.Position)
+            cam.CFrame = CFrame.new(root.Position + Vector3.new(Settings.camOffX or 0, Settings.camOffY or 35, Settings.camOffZ or 0), root.Position)
         end
     end
 end)
 
 -- ================================= GUI PANEL ================================
+-- Layout Horizontal 2-Kolom Berbasis Tab (Persis Nasi Rendang, Posisi Tengah Layar)
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "YancokEgg_UI"
+ScreenGui.Name = "YancokEgg_Panel"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = GuiParent
 
 local function addCorner(r, p)
     local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, r or 6)
+    c.CornerRadius = UDim.new(0, r or 8)
     c.Parent = p
     return c
 end
@@ -701,24 +750,24 @@ local function addStroke(col, th, p)
     return s
 end
 
--- =========================== MINI BAR (FLOATING BADGE) =======================
+-- =========================== FLOATING MINI BADGE ============================
 local MiniBar = Instance.new("Frame")
 MiniBar.Name = "MiniBar"
-MiniBar.AnchorPoint = Vector2.new(1, 1)
-MiniBar.Position = UDim2.new(1, -12, 1, -12)
-MiniBar.Size = UDim2.new(0, 155, 0, 26)
+MiniBar.AnchorPoint = Vector2.new(0.5, 1)
+MiniBar.Position = UDim2.new(0.5, 0, 1, -15)
+MiniBar.Size = UDim2.new(0, 180, 0, 28)
 MiniBar.BackgroundColor3 = Theme.Background
 MiniBar.BorderSizePixel = 0
 MiniBar.Active = true
 MiniBar.Visible = false
 MiniBar.Parent = ScreenGui
-addCorner(6, MiniBar)
-addStroke(Theme.Accent, 1, MiniBar)
+addCorner(8, MiniBar)
+addStroke(Theme.Accent, 1.2, MiniBar)
 
 local MiniLabel = Instance.new("TextLabel")
 MiniLabel.Text = "🔥 Yancok: 0 Telur ⚡"
 MiniLabel.Font = FONT_BOLD
-MiniLabel.TextSize = 10
+MiniLabel.TextSize = 11
 MiniLabel.TextColor3 = Theme.Accent
 MiniLabel.Size = UDim2.new(1, 0, 1, 0)
 MiniLabel.BackgroundTransparency = 1
@@ -730,21 +779,38 @@ MiniBtn.BackgroundTransparency = 1
 MiniBtn.Text = ""
 MiniBtn.Parent = MiniBar
 
--- =========================== MAIN WINDOW (COMPACT) ==========================
+-- =========================== MAIN WINDOW (CENTERED) =========================
+local WIN_W, WIN_H = 620, 260
 local Window = Instance.new("Frame")
 Window.Name = "Window"
-Window.AnchorPoint = Vector2.new(1, 1)
-Window.Position = UDim2.new(1, -12, 1, -12)
-Window.Size = UDim2.new(0, 210, 0, 225)
+Window.AnchorPoint = Vector2.new(0.5, 0.5)
+Window.Position = UDim2.new(0.5, 0, 0.5, 0) -- TEPAT DI TENGAH LAYAR
+Window.Size = UDim2.new(0, WIN_W, 0, WIN_H)
 Window.BackgroundColor3 = Theme.Background
 Window.BorderSizePixel = 0
 Window.Active = true
-Window.ClipsDescendants = true
 Window.Parent = ScreenGui
-addCorner(8, Window)
-addStroke(Theme.Border, 1.2, Window)
+addCorner(12, Window)
+addStroke(Theme.Accent, 1.5, Window)
 
--- Minimize / Restore handler
+-- Responsiveness: Otomatis scale jika layar mobile / resolusi kecil
+local WinScale = Instance.new("UIScale")
+WinScale.Parent = Window
+local function updateScale()
+    pcall(function()
+        local vp = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize
+        if vp and (vp.X < 680 or vp.Y < 380) then
+            WinScale.Scale = math.clamp(math.min(vp.X / 680, vp.Y / 320), 0.55, 0.95)
+        else
+            WinScale.Scale = 1
+        end
+    end)
+end
+if Workspace.CurrentCamera then
+    Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
+end
+updateScale()
+
 local function setMinimized(mini)
     Window.Visible = not mini
     MiniBar.Visible = mini
@@ -770,7 +836,6 @@ local function makeDraggable(frame, handle)
     UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local delta = input.Position - dragStart
-            frame.AnchorPoint = Vector2.new(0, 0)
             frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
     end)
@@ -778,37 +843,38 @@ end
 
 makeDraggable(MiniBar, MiniBar)
 
--- Header
-local Header = Instance.new("Frame")
-Header.Size = UDim2.new(1, 0, 0, 26)
-Header.BackgroundColor3 = Theme.Header
-Header.BorderSizePixel = 0
-Header.Parent = Window
-addCorner(8, Header)
-makeDraggable(Window, Header)
+-- TopBar
+local TopBar = Instance.new("Frame")
+TopBar.Name = "TopBar"
+TopBar.Size = UDim2.new(1, 0, 0, 36)
+TopBar.BackgroundColor3 = Theme.Header
+TopBar.BorderSizePixel = 0
+TopBar.Parent = Window
+addCorner(12, TopBar)
+makeDraggable(Window, TopBar)
 
 local Title = Instance.new("TextLabel")
-Title.Text = "🔥 YANCOK (Keyless)"
+Title.Text = "🔥 YANCOK — STEAL AN EGG (100% FREE & KEYLESS)"
 Title.Font = FONT_BOLD
-Title.TextSize = 10
+Title.TextSize = 12
 Title.TextColor3 = Theme.Accent
-Title.Position = UDim2.new(0, 8, 0, 0)
-Title.Size = UDim2.new(1, -52, 1, 0)
+Title.Position = UDim2.new(0, 14, 0, 0)
+Title.Size = UDim2.new(1, -75, 1, 0)
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.BackgroundTransparency = 1
-Title.Parent = Header
+Title.Parent = TopBar
 
 local MinBtn = Instance.new("TextButton")
 MinBtn.Text = "—"
 MinBtn.Font = FONT_BOLD
-MinBtn.TextSize = 11
+MinBtn.TextSize = 12
 MinBtn.TextColor3 = Theme.TextSub
-MinBtn.Size = UDim2.new(0, 20, 0, 20)
-MinBtn.Position = UDim2.new(1, -44, 0, 3)
+MinBtn.Size = UDim2.new(0, 24, 0, 24)
+MinBtn.Position = UDim2.new(1, -56, 0, 6)
 MinBtn.BackgroundColor3 = Theme.Card
 MinBtn.BorderSizePixel = 0
-MinBtn.Parent = Header
-addCorner(4, MinBtn)
+MinBtn.Parent = TopBar
+addCorner(6, MinBtn)
 MinBtn.MouseButton1Click:Connect(function()
     setMinimized(true)
 end)
@@ -816,172 +882,524 @@ end)
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Text = "✕"
 CloseBtn.Font = FONT_BOLD
-CloseBtn.TextSize = 10
+CloseBtn.TextSize = 11
 CloseBtn.TextColor3 = Theme.TextSub
-CloseBtn.Size = UDim2.new(0, 20, 0, 20)
-CloseBtn.Position = UDim2.new(1, -22, 0, 3)
+CloseBtn.Size = UDim2.new(0, 24, 0, 24)
+CloseBtn.Position = UDim2.new(1, -28, 0, 6)
 CloseBtn.BackgroundColor3 = Theme.Card
 CloseBtn.BorderSizePixel = 0
-CloseBtn.Parent = Header
-addCorner(4, CloseBtn)
+CloseBtn.Parent = TopBar
+addCorner(6, CloseBtn)
 CloseBtn.MouseButton1Click:Connect(function()
     setMinimized(true)
 end)
 
--- Main Scroll Body
-local Scroll = Instance.new("ScrollingFrame")
-Scroll.Size = UDim2.new(1, -10, 1, -32)
-Scroll.Position = UDim2.new(0, 5, 0, 29)
-Scroll.BackgroundTransparency = 1
-Scroll.BorderSizePixel = 0
-Scroll.ScrollBarThickness = 2
-Scroll.ScrollBarImageColor3 = Theme.Accent
-Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-Scroll.Parent = Window
+-- ---- TAB BAR HORIZONTAL ----
+local TabBar = Instance.new("Frame")
+TabBar.Size = UDim2.new(1, -16, 0, 28)
+TabBar.Position = UDim2.new(0, 8, 0, 42)
+TabBar.BackgroundTransparency = 1
+TabBar.Parent = Window
 
-local List = Instance.new("UIListLayout")
-List.Padding = UDim.new(0, 4)
-List.SortOrder = Enum.SortOrder.LayoutOrder
-List.Parent = Scroll
+local TabList = Instance.new("UIListLayout")
+TabList.FillDirection = Enum.FillDirection.Horizontal
+TabList.Padding = UDim.new(0, 6)
+TabList.SortOrder = Enum.SortOrder.LayoutOrder
+TabList.Parent = TabBar
 
--- Counter Card
-local ClaimCard = Instance.new("Frame")
-ClaimCard.Size = UDim2.new(1, 0, 0, 24)
-ClaimCard.BackgroundColor3 = Theme.Card
-ClaimCard.BorderSizePixel = 0
-ClaimCard.Parent = Scroll
-addCorner(5, ClaimCard)
+local Pages, TabBtns, activeTab = {}, {}, nil
+local ContentHost = Instance.new("Frame")
+ContentHost.Size = UDim2.new(1, -16, 1, -80)
+ContentHost.Position = UDim2.new(0, 8, 0, 74)
+ContentHost.BackgroundTransparency = 1
+ContentHost.Parent = Window
 
-local ClaimLabel = Instance.new("TextLabel")
-ClaimLabel.Text = "Telur: 0  |  AFK Aktif"
-ClaimLabel.Font = FONT_BOLD
-ClaimLabel.TextSize = 10
-ClaimLabel.TextColor3 = Theme.Green
-ClaimLabel.Size = UDim2.new(1, -10, 1, 0)
-ClaimLabel.Position = UDim2.new(0, 8, 0, 0)
-ClaimLabel.TextXAlignment = Enum.TextXAlignment.Left
-ClaimLabel.BackgroundTransparency = 1
-ClaimLabel.Parent = ClaimCard
+local function showTab(name)
+    for n, pg in pairs(Pages) do pg.Visible = (n == name) end
+    for n, b in pairs(TabBtns) do
+        b.BackgroundColor3 = (n == name) and Theme.Accent or Theme.Card
+        b.TextColor3 = (n == name) and Color3.fromRGB(0, 0, 0) or Theme.TextSub
+    end
+    activeTab = name
+end
+
+-- Tiap halaman = 2 KOLOM (kiri & kanan) yang masing-masing scroll secara independen
+local function makePage(name, order)
+    local pg = Instance.new("Frame")
+    pg.Size = UDim2.new(1, 0, 1, 0)
+    pg.BackgroundTransparency = 1
+    pg.Visible = false
+    pg.Parent = ContentHost
+
+    local function col(isRight)
+        local c = Instance.new("ScrollingFrame")
+        c.Size = UDim2.new(0.5, -6, 1, 0)
+        c.Position = isRight and UDim2.new(0.5, 6, 0, 0) or UDim2.new(0, 0, 0, 0)
+        c.BackgroundTransparency = 1
+        c.BorderSizePixel = 0
+        c.ScrollBarThickness = 3
+        c.ScrollBarImageColor3 = Theme.Accent
+        c.CanvasSize = UDim2.new(0, 0, 0, 0)
+        c.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        c.Parent = pg
+        local l = Instance.new("UIListLayout")
+        l.Padding = UDim.new(0, 5)
+        l.Parent = c
+        return c
+    end
+
+    local L, R = col(false), col(true)
+    Pages[name] = pg
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 108, 1, 0)
+    btn.LayoutOrder = order
+    btn.BackgroundColor3 = Theme.Card
+    btn.BorderSizePixel = 0
+    btn.Font = FONT_BOLD
+    btn.Text = name
+    btn.TextSize = 11.5
+    btn.TextColor3 = Theme.TextSub
+    btn.AutoButtonColor = false
+    btn.Parent = TabBar
+    addCorner(6, btn)
+
+    btn.MouseButton1Click:Connect(function() showTab(name) end)
+    TabBtns[name] = btn
+    return L, R
+end
+
+-- ======================== HELPER KOMPONEN UI ================================
+local function section(parent, text)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, -8, 0, 18)
+    l.BackgroundTransparency = 1
+    l.Font = FONT_BOLD
+    l.Text = string.upper(text)
+    l.TextColor3 = Theme.TextSub
+    l.TextSize = 10.5
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = parent
+    return l
+end
+
+local function toggle(parent, label, key)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -8, 0, 26)
+    row.BackgroundTransparency = 1
+    row.Parent = parent
+
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, -50, 1, 0)
+    l.Position = UDim2.new(0, 2, 0, 0)
+    l.BackgroundTransparency = 1
+    l.Font = FONT_MED
+    l.Text = label
+    l.TextColor3 = Theme.Text
+    l.TextSize = 12
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = row
+
+    local pill = Instance.new("Frame")
+    pill.Size = UDim2.new(0, 40, 0, 20)
+    pill.Position = UDim2.new(1, -42, 0.5, -10)
+    pill.BackgroundColor3 = Settings[key] and Theme.Accent or Theme.Border
+    pill.BorderSizePixel = 0
+    pill.Parent = row
+    addCorner(10, pill)
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.Position = Settings[key] and UDim2.new(1, -7, 0.5, 0) or UDim2.new(0, 7, 0.5, 0)
+    knob.BackgroundColor3 = Settings[key] and Color3.new(0, 0, 0) or Theme.Text
+    knob.BorderSizePixel = 0
+    knob.Parent = pill
+    addCorner(7, knob)
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 1, 0)
+    btn.BackgroundTransparency = 1
+    btn.Text = ""
+    btn.AutoButtonColor = false
+    btn.Parent = row
+
+    btn.MouseButton1Click:Connect(function()
+        Settings[key] = not Settings[key]
+        pill.BackgroundColor3 = Settings[key] and Theme.Accent or Theme.Border
+        knob.Position = Settings[key] and UDim2.new(1, -7, 0.5, 0) or UDim2.new(0, 7, 0.5, 0)
+        knob.BackgroundColor3 = Settings[key] and Color3.new(0, 0, 0) or Theme.Text
+        saveConfig()
+        if key == "fpsBoost" and Settings.fpsBoost then applyFpsBoost() end
+    end)
+    return row
+end
+
+local function slider(parent, label, key, minV, maxV, step)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -8, 0, 38)
+    row.BackgroundTransparency = 1
+    row.Parent = parent
+
+    local val = Settings[key] or minV
+
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, -50, 0, 16)
+    l.Position = UDim2.new(0, 2, 0, 0)
+    l.BackgroundTransparency = 1
+    l.Font = FONT_MED
+    l.Text = label
+    l.TextColor3 = Theme.Text
+    l.TextSize = 11.5
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = row
+
+    local valLbl = Instance.new("TextLabel")
+    valLbl.Size = UDim2.new(0, 44, 0, 16)
+    valLbl.Position = UDim2.new(1, -44, 0, 0)
+    valLbl.BackgroundTransparency = 1
+    valLbl.Font = FONT_BOLD
+    valLbl.Text = tostring(val)
+    valLbl.TextColor3 = Theme.Accent
+    valLbl.TextSize = 11.5
+    valLbl.TextXAlignment = Enum.TextXAlignment.Right
+    valLbl.Parent = row
+
+    local track = Instance.new("Frame")
+    track.Size = UDim2.new(1, -6, 0, 6)
+    track.Position = UDim2.new(0, 3, 0, 24)
+    track.BackgroundColor3 = Theme.Border
+    track.BorderSizePixel = 0
+    track.Parent = row
+    addCorner(3, track)
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.Position = UDim2.new((val - minV) / math.max(1, maxV - minV), 0, 0.5, 0)
+    knob.BackgroundColor3 = Theme.Text
+    knob.BorderSizePixel = 0
+    knob.Parent = track
+    addCorner(7, knob)
+
+    local hit = Instance.new("TextButton")
+    hit.Size = UDim2.new(1, 0, 0, 22)
+    hit.Position = UDim2.new(0, 0, 0, 16)
+    hit.BackgroundTransparency = 1
+    hit.Text = ""
+    hit.AutoButtonColor = false
+    hit.Parent = row
+
+    hit.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+            local rel = math.clamp((inp.Position.X - track.AbsolutePosition.X) / math.max(1, track.AbsoluteSize.X), 0, 1)
+            local v = minV + rel * (maxV - minV)
+            if step then v = math.floor(v / step + 0.5) * step end
+            if step and step < 1 then
+                v = tonumber(string.format("%.2f", v))
+            else
+                v = math.floor(v + 0.5)
+            end
+            Settings[key] = math.clamp(v, minV, maxV)
+            valLbl.Text = tostring(Settings[key])
+            knob.Position = UDim2.new((Settings[key] - minV) / math.max(1, maxV - minV), 0, 0.5, 0)
+            saveConfig()
+        end
+    end)
+
+    return function()
+        valLbl.Text = tostring(Settings[key])
+        knob.Position = UDim2.new((Settings[key] - minV) / math.max(1, maxV - minV), 0, 0.5, 0)
+    end
+end
+
+local function textbox(parent, label, key)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -8, 0, 26)
+    row.BackgroundTransparency = 1
+    row.Parent = parent
+
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(0.38, 0, 1, 0)
+    l.BackgroundTransparency = 1
+    l.Font = FONT_MED
+    l.Text = label
+    l.TextColor3 = Theme.Text
+    l.TextSize = 11.5
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = row
+
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(0.62, -4, 1, 0)
+    box.Position = UDim2.new(0.38, 4, 0, 0)
+    box.BackgroundColor3 = Theme.Card
+    box.BorderSizePixel = 0
+    box.Font = FONT_REG
+    box.Text = Settings[key] or ""
+    box.PlaceholderText = "isi teks..."
+    box.TextColor3 = Theme.Text
+    box.PlaceholderColor3 = Theme.TextSub
+    box.TextSize = 11
+    box.ClearTextOnFocus = false
+    box.TextXAlignment = Enum.TextXAlignment.Left
+    box.Parent = row
+    addCorner(6, box)
+
+    box.FocusLost:Connect(function()
+        Settings[key] = box.Text
+        saveConfig()
+    end)
+end
+
+local function dropdown(parent, label, key, options)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -8, 0, 26)
+    row.BackgroundTransparency = 1
+    row.Parent = parent
+
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(0.44, 0, 1, 0)
+    l.BackgroundTransparency = 1
+    l.Font = FONT_MED
+    l.Text = label
+    l.TextColor3 = Theme.Text
+    l.TextSize = 11.5
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = row
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.56, -4, 1, 0)
+    btn.Position = UDim2.new(0.44, 4, 0, 0)
+    btn.BackgroundColor3 = Theme.Card
+    btn.BorderSizePixel = 0
+    btn.Font = FONT_BOLD
+    btn.Text = tostring(Settings[key])
+    btn.TextSize = 11.5
+    btn.TextColor3 = Theme.Accent
+    btn.AutoButtonColor = false
+    btn.Parent = row
+    addCorner(6, btn)
+
+    btn.MouseButton1Click:Connect(function()
+        local cur = Settings[key]
+        local idx = 1
+        for i, opt in ipairs(options) do
+            if tostring(opt) == tostring(cur) then idx = i break end
+        end
+        local nextOpt = options[(idx % #options) + 1]
+        Settings[key] = nextOpt
+        btn.Text = tostring(nextOpt)
+        saveConfig()
+    end)
+end
+
+local function button(parent, label, onClick)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -8, 0, 28)
+    b.BackgroundColor3 = Theme.AccentDim
+    b.BorderSizePixel = 0
+    b.Font = FONT_BOLD
+    b.Text = label
+    b.TextSize = 12
+    b.TextColor3 = Color3.fromRGB(255, 255, 255)
+    b.AutoButtonColor = false
+    b.Parent = parent
+    addCorner(6, b)
+
+    b.MouseButton1Click:Connect(function() pcall(onClick) end)
+    return b
+end
+
+-- ===================== SUSUNAN HALAMAN MENU (5 TAB LENGKAP) =================
+-- TAB 1: Farm Telur
+local farmL, farmR = makePage("Farm Telur", 1)
+section(farmL, "Auto Steal Telur")
+toggle(farmL, "Auto Steal Telur", "autoSteal")
+slider(farmL, "Jeda Ambil Telur (s)", "stealDelay", 0.05, 1.0, 0.05)
+toggle(farmL, "Teleport ke Posisi Telur", "autoTeleport")
+
+section(farmR, "Auto Hatch & Klaim")
+toggle(farmR, "Auto Hatch Telur", "autoHatch")
+dropdown(farmR, "Jumlah Sekali Hatch", "hatchAmount", { 1, 3, 8 })
+
+local ClaimsCard = Instance.new("Frame")
+ClaimsCard.Size = UDim2.new(1, -8, 0, 42)
+ClaimsCard.BackgroundColor3 = Theme.Card
+ClaimsCard.BorderSizePixel = 0
+ClaimsCard.Parent = farmR
+addCorner(6, ClaimsCard)
+
+local EggCountLbl = Instance.new("TextLabel")
+EggCountLbl.Text = "Telur Terklaim: 0"
+EggCountLbl.Font = FONT_BOLD
+EggCountLbl.TextSize = 13
+EggCountLbl.TextColor3 = Theme.Green
+EggCountLbl.Position = UDim2.new(0, 10, 0, 4)
+EggCountLbl.Size = UDim2.new(1, -20, 0, 18)
+EggCountLbl.TextXAlignment = Enum.TextXAlignment.Left
+EggCountLbl.BackgroundTransparency = 1
+EggCountLbl.Parent = ClaimsCard
+
+local EggRateLbl = Instance.new("TextLabel")
+EggRateLbl.Text = "Status: 100% Standalone | Bebas Key"
+EggRateLbl.Font = FONT_REG
+EggRateLbl.TextSize = 10
+EggRateLbl.TextColor3 = Theme.TextSub
+EggRateLbl.Position = UDim2.new(0, 10, 0, 22)
+EggRateLbl.Size = UDim2.new(1, -20, 0, 16)
+EggRateLbl.TextXAlignment = Enum.TextXAlignment.Left
+EggRateLbl.BackgroundTransparency = 1
+EggRateLbl.Parent = ClaimsCard
 
 task.spawn(function()
     while getgenv()[SCRIPT_ID] == RUN_ID do
         task.wait(1)
-        ClaimLabel.Text = "Telur: " .. tostring(totalClaims) .. "  |  AFK Aktif"
+        EggCountLbl.Text = "Telur Terklaim: " .. tostring(totalClaims)
         MiniLabel.Text = "🔥 Yancok: " .. tostring(totalClaims) .. " ⚡"
     end
 end)
 
--- Helper Toggle Compact
-local function createToggle(title, initialVal, onToggle)
-    local card = Instance.new("Frame")
-    card.Size = UDim2.new(1, 0, 0, 26)
-    card.BackgroundColor3 = Theme.Card
-    card.BorderSizePixel = 0
-    card.Parent = Scroll
-    addCorner(5, card)
+-- TAB 2: Server Hop (Persis Nasi Rendang)
+local hopL, hopR = makePage("Server Hop", 2)
+section(hopL, "Trigger Pindah Server")
+toggle(hopL, "Auto Server Hop", "autoHop")
+dropdown(hopL, "Hop When", "hopWhen", { "Any", "After Steal Count", "Interval", "No Match" })
+slider(hopL, "No Match Delay (s)", "hopNoMatchDelay", 5, 180, 5)
+slider(hopL, "Hop Interval (min)", "hopInterval", 1, 60, 1)
+slider(hopL, "Steals Target", "hopSteals", 10, 200, 5)
 
-    local lbl = Instance.new("TextLabel")
-    lbl.Text = title
-    lbl.Font = FONT_BOLD
-    lbl.TextSize = 9.5
-    lbl.TextColor3 = Theme.Text
-    lbl.Position = UDim2.new(0, 8, 0, 0)
-    lbl.Size = UDim2.new(1, -50, 1, 0)
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.BackgroundTransparency = 1
-    lbl.Parent = card
+section(hopR, "Target Server")
+slider(hopR, "Min Player (0=off)", "hopMinPlayers", 0, 20, 1)
+slider(hopR, "Max Player (0=off)", "hopMaxPlayers", 0, 20, 1)
+toggle(hopR, "Prefer Server Paling Sepi", "hopPreferEmpty")
 
-    local btn = Instance.new("TextButton")
-    btn.Text = initialVal and "ON" or "OFF"
-    btn.Font = FONT_BOLD
-    btn.TextSize = 9
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.BackgroundColor3 = initialVal and Theme.Green or Theme.Danger
-    btn.Size = UDim2.new(0, 36, 0, 18)
-    btn.Position = UDim2.new(1, -42, 0.5, -9)
-    btn.BorderSizePixel = 0
-    btn.Parent = card
-    addCorner(4, btn)
+button(hopR, "🚀 Hop Server Sekarang", function()
+    doServerHop(function(s)
+        if hopCountLbl then hopCountLbl.Text = s end
+    end)
+end)
 
-    local state = initialVal
-    btn.MouseButton1Click:Connect(function()
-        state = not state
-        btn.Text = state and "ON" or "OFF"
-        btn.BackgroundColor3 = state and Theme.Green or Theme.Danger
-        onToggle(state)
+hopCountLbl = Instance.new("TextLabel")
+hopCountLbl.Size = UDim2.new(1, -8, 0, 16)
+hopCountLbl.BackgroundTransparency = 1
+hopCountLbl.Font = FONT_MED
+hopCountLbl.Text = "hop off"
+hopCountLbl.TextColor3 = Theme.TextSub
+hopCountLbl.TextSize = 11.5
+hopCountLbl.TextXAlignment = Enum.TextXAlignment.Left
+hopCountLbl.Parent = hopR
+
+statusLbl = Instance.new("TextLabel")
+statusLbl.Size = UDim2.new(1, -8, 0, 16)
+statusLbl.BackgroundTransparency = 1
+statusLbl.Font = FONT_MED
+statusLbl.Text = "claims: 0"
+statusLbl.TextColor3 = Theme.TextSub
+statusLbl.TextSize = 11.5
+statusLbl.TextXAlignment = Enum.TextXAlignment.Left
+statusLbl.Parent = hopR
+
+-- TAB 3: Auto Chat (Persis Nasi Rendang)
+local chatL, chatR = makePage("Auto Chat", 3)
+section(chatL, "Broadcast Chat Otomatis")
+toggle(chatL, "Auto Send Chat", "autoChat")
+slider(chatL, "Interval Chat (s)", "chatInterval", 5, 300, 5)
+
+chatCountLbl = Instance.new("TextLabel")
+chatCountLbl.Size = UDim2.new(1, -8, 0, 16)
+chatCountLbl.BackgroundTransparency = 1
+chatCountLbl.Font = FONT_MED
+chatCountLbl.Text = "chat off"
+chatCountLbl.TextColor3 = Theme.TextSub
+chatCountLbl.TextSize = 11.5
+chatCountLbl.TextXAlignment = Enum.TextXAlignment.Left
+chatCountLbl.Parent = chatL
+
+section(chatR, "Pesan (Rotasi Anti-Spam)")
+textbox(chatR, "Pesan 1", "chatText")
+textbox(chatR, "Pesan 2", "chatText2")
+textbox(chatR, "Pesan 3", "chatText3")
+
+-- TAB 4: Kamera POV (Persis Nasi Rendang)
+local camL, camR = makePage("Kamera POV", 4)
+section(camL, "Sudut Kamera AFK")
+toggle(camL, "Kunci Sudut Kamera", "camLock")
+
+local updCamX, updCamY, updCamZ, updCamFov
+button(camL, "📸 Ambil Sudut POV Saat Ini", function()
+    local chr = LocalPlayer.Character
+    local r = chr and chr:FindFirstChild("HumanoidRootPart")
+    local c = Workspace.CurrentCamera
+    if r and c then
+        local off = c.CFrame.Position - r.Position
+        Settings.camOffX = math.floor(off.X + 0.5)
+        Settings.camOffY = math.floor(off.Y + 0.5)
+        Settings.camOffZ = math.floor(off.Z + 0.5)
+        Settings.camFov = math.floor(c.FieldOfView + 0.5)
+        if updCamX then updCamX(); updCamY(); updCamZ(); updCamFov() end
         saveConfig()
-    end)
-    return card
-end
-
--- Toggles (Ringkas & Efisien)
-createToggle("Auto Steal Telur", Settings.autoSteal, function(val)
-    Settings.autoSteal = val
+        print(("[Yancok] POV captured: %d, %d, %d | FOV %d"):format(Settings.camOffX, Settings.camOffY, Settings.camOffZ, Settings.camFov))
+    end
 end)
 
-createToggle("Auto Hatch Telur", Settings.autoHatch, function(val)
-    Settings.autoHatch = val
+section(camR, "Offset & Zoom")
+updCamX = slider(camR, "Offset X", "camOffX", -200, 200, 1)
+updCamY = slider(camR, "Offset Y", "camOffY", -100, 200, 1)
+updCamZ = slider(camR, "Offset Z", "camOffZ", -200, 200, 1)
+updCamFov = slider(camR, "FOV Kamera", "camFov", 30, 120, 1)
+
+-- TAB 5: Misc & FPS
+local miscL, miscR = makePage("Misc & FPS", 5)
+section(miscL, "Performa & Hemat Resource")
+toggle(miscL, "Extreme FPS Booster", "fpsBoost")
+toggle(miscL, "Anti-AFK (Anti Kick 20 Menit)", "antiAfk")
+
+section(miscR, "Pertemanan & Rejoin")
+toggle(miscR, "Auto Terima Pertemanan", "autoAcceptFriends")
+button(miscR, "🔄 Rejoin Server Ini", function()
+    pcall(function() TeleportService:TeleportToPlaceInstance(PLACE_ID, CURRENT_JOB, LocalPlayer) end)
 end)
 
-createToggle("Smart Auto Hop", Settings.autoHop, function(val)
-    Settings.autoHop = val
-end)
+-- Tab default pertama
+showTab("Farm Telur")
 
-createToggle("Extreme FPS Boost", Settings.fpsBoost, function(val)
-    Settings.fpsBoost = val
-    if val then applyFpsBoost() end
-end)
+-- ==================== OVERLAY COUNTDOWN (TENGAH ATAS) =======================
+local OverlayLbl = Instance.new("TextLabel")
+OverlayLbl.Name = "NextHopOverlay"
+OverlayLbl.AnchorPoint = Vector2.new(0.5, 0)
+OverlayLbl.Position = UDim2.new(0.5, 0, 0, 18)
+OverlayLbl.Size = UDim2.new(0, 360, 0, 24)
+OverlayLbl.BackgroundTransparency = 1
+OverlayLbl.Font = FONT_BOLD
+OverlayLbl.Text = "Next Hop: off"
+OverlayLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+OverlayLbl.TextSize = 13
+OverlayLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+OverlayLbl.TextStrokeTransparency = 0
+OverlayLbl.Parent = ScreenGui
 
-createToggle("Auto Terima Teman", Settings.autoAccept, function(val)
-    Settings.autoAccept = val
-end)
-
-createToggle("Auto Broadcast Chat", Settings.autoChat, function(val)
-    Settings.autoChat = val
-end)
-
-createToggle("Camera POV Lock", Settings.camLock, function(val)
-    Settings.camLock = val
-end)
-
--- Button Manual Hop
-local HopNowCard = Instance.new("Frame")
-HopNowCard.Size = UDim2.new(1, 0, 0, 28)
-HopNowCard.BackgroundColor3 = Theme.Card
-HopNowCard.BorderSizePixel = 0
-HopNowCard.Parent = Scroll
-addCorner(5, HopNowCard)
-
-local HopBtn = Instance.new("TextButton")
-HopBtn.Text = "🚀 PINDAH SERVER"
-HopBtn.Font = FONT_BOLD
-HopBtn.TextSize = 9.5
-HopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-HopBtn.BackgroundColor3 = Theme.AccentDim
-HopBtn.Size = UDim2.new(1, -12, 0, 20)
-HopBtn.Position = UDim2.new(0, 6, 0, 4)
-HopBtn.BorderSizePixel = 0
-HopBtn.Parent = HopNowCard
-addCorner(4, HopBtn)
-
-HopBtn.MouseButton1Click:Connect(function()
-    task.spawn(function()
-        doServerHop(function(status)
-            HopBtn.Text = status
-        end)
-    end)
-end)
-
--- Toggle Shortcut Keyboard
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if input.KeyCode == Enum.KeyCode.RightShift and ScreenGui.Parent then
-        if Window.Visible then
-            setMinimized(true)
-        else
-            setMinimized(false)
+task.spawn(function()
+    while getgenv()[SCRIPT_ID] == RUN_ID do
+        task.wait(1)
+        if OverlayLbl and OverlayLbl.Parent then
+            if Settings.autoHop and hopCountLbl and hopCountLbl.Text ~= "hop off" then
+                OverlayLbl.Text = "⚡ " .. string.upper(hopCountLbl.Text)
+            else
+                OverlayLbl.Text = "⚡ YANCOK: " .. tostring(totalClaims) .. " TELUR TERCURI"
+            end
         end
     end
 end)
 
-print("[Yancok] UI ringkas & Server Hopper siap! Tekan [RightShift] untuk minimize/restore.")
+-- Toggle Shortcut Keyboard (RightShift)
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.RightShift and ScreenGui.Parent then
+        Window.Visible = not Window.Visible
+        if not Window.Visible then
+            MiniBar.Visible = false
+        end
+    end
+end)
+
+print("[Yancok] Suite lengkap ala Nasi Rendang aktif di TENGAH layar! Tekan [RightShift] untuk sembunyikan/tampilkan.")
