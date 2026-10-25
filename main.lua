@@ -86,16 +86,16 @@ local CFG_FOLDER = "Yancok_StealAnEgg"
 local CFG_PATH   = CFG_FOLDER .. "/config.json"
 
 local Settings = {
-    -- 1. Farm Telur & Stealth (100% OFF saat inject)
-    autoSteal         = false,              -- OFF
+    -- 1. Farm Telur & Stealth
+    autoSteal         = true,               -- ON (Langsung otomatis jalan)
     movementMode      = "Safe Walk",        -- "Safe Walk" | "Smooth Glide" | "Instant CFrame"
     safeMode          = true,               -- Anti-Cheat Protection
-    stealDelay        = 0.5,                -- Jeda aman
+    stealDelay        = 0.4,                -- Jeda aman
     maxDistance       = 250,                -- Radius aman pencarian telur
     autoHatch         = false,              -- OFF
     hatchAmount       = 1,
 
-    -- 2. Server Hop (100% OFF saat inject)
+    -- 2. Server Hop
     autoHop           = false,              -- OFF
     hopWhen           = "Any",              -- "Any" | "After Steal Count" | "Interval" | "No Match"
     hopNoMatchDelay   = 60,                 -- detik
@@ -105,21 +105,21 @@ local Settings = {
     hopMaxPlayers     = 6,                  -- max pemain
     hopPreferEmpty    = true,
 
-    -- 3. Auto Chat (100% OFF saat inject)
+    -- 3. Auto Chat
     autoChat          = false,              -- OFF
     chatInterval      = 25,
     chatText          = "Yancok Steal An Egg - 100% Free & Keyless!",
     chatText2         = "Farming Eggs AFK",
     chatText3         = "",
 
-    -- 4. Camera (100% OFF saat inject)
+    -- 4. Camera
     camLock           = false,              -- OFF
     camOffX           = 0,
     camOffY           = 35,
     camOffZ           = 0,
     camFov            = 70,
 
-    -- 5. Misc & FPS (100% OFF saat inject)
+    -- 5. Misc & FPS
     fpsBoost          = false,              -- OFF
     autoAcceptFriends = false,              -- OFF
     antiAfk           = false,              -- OFF
@@ -141,23 +141,17 @@ local function loadConfig()
             local tbl = HttpService:JSONDecode(data)
             if type(tbl) == "table" then
                 for k, v in pairs(tbl) do
-                    -- Jangan load status true untuk toggle otomatis agar saat inject 100% diam
-                    if type(v) ~= "boolean" or (not k:find("auto") and k ~= "antiAfk" and k ~= "fpsBoost" and k ~= "camLock") then
+                    if type(v) == type(Settings[k]) then
                         Settings[k] = v
                     end
                 end
             end
         end
     end)
-    -- Paksa semua aksi otomatis TETAP MATI (OFF) saat script baru dieksekusi:
-    Settings.autoSteal         = false
-    Settings.autoHop           = false
-    Settings.autoHatch         = false
-    Settings.autoChat          = false
-    Settings.camLock           = false
-    Settings.fpsBoost          = false
-    Settings.autoAcceptFriends = false
-    Settings.antiAfk           = false
+    -- Pastikan autoSteal aktif secara default saat pertama kali di-run
+    if Settings.autoSteal == nil then
+        Settings.autoSteal = true
+    end
 end
 loadConfig()
 
@@ -210,20 +204,42 @@ local function getClosestEgg(maxDist)
         Workspace:FindFirstChild("SpawnedEggs"),
         Workspace:FindFirstChild("EggsFolder"),
         Workspace:FindFirstChild("Nests"),
+        Workspace:FindFirstChild("EggWorld"),
+        Workspace:FindFirstChild("Map"),
     }
     for _, folder in ipairs(containers) do
         if folder then
             for _, item in ipairs(folder:GetChildren()) do
                 checkObj(item)
+                if item:IsA("Folder") or item:IsA("Model") then
+                    for _, sub in ipairs(item:GetChildren()) do
+                        checkObj(sub)
+                    end
+                end
             end
         end
     end
 
     if not bestEgg then
         for _, obj in ipairs(Workspace:GetChildren()) do
-            if (obj:IsA("Model") or obj:IsA("BasePart")) and not (LocalPlayer.Character and obj:IsDescendantOf(LocalPlayer.Character)) then
-                if string.find(string.lower(obj.Name), "egg") then
-                    checkObj(obj)
+            if (obj:IsA("Model") or obj:IsA("Folder") or obj:IsA("BasePart")) and not (LocalPlayer.Character and obj:IsDescendantOf(LocalPlayer.Character)) then
+                checkObj(obj)
+                if obj:IsA("Model") or obj:IsA("Folder") then
+                    for _, sub in ipairs(obj:GetChildren()) do
+                        checkObj(sub)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Fallback: Scan langsung semua ProximityPrompt yang ada di Workspace
+    if not bestEgg then
+        for _, prompt in ipairs(Workspace:GetDescendants()) do
+            if prompt:IsA("ProximityPrompt") and prompt.Enabled then
+                local p = prompt.Parent
+                if p and not (LocalPlayer.Character and p:IsDescendantOf(LocalPlayer.Character)) then
+                    checkObj(p)
                 end
             end
         end
@@ -356,21 +372,27 @@ local function stealEgg(eggObj)
     local prompt = eggObj:FindFirstChildWhichIsA("ProximityPrompt", true)
     if not (prompt and prompt.Enabled) then return false end
 
-    -- Jarak interaksi natural (4.5 - 6.5 studs, tidak menabrak / merusak fisik telur)
-    local stopDistance = math.clamp((prompt.MaxActivationDistance or 10) * 0.65, 4.5, 6.5)
+    -- Jarak interaksi natural (5 - 8 studs)
+    local maxActivation = prompt.MaxActivationDistance or 10
+    local stopDistance = math.clamp(maxActivation * 0.7, 4.5, 7.5)
 
     -- Gerak ke target dengan navigasi cerdas
     local arrived = moveToTarget(targetPart.Position, stopDistance)
-    if not arrived then return false end
+    local currentDist = (hrp.Position - targetPart.Position).Magnitude
 
-    -- Hadapkan karakter ke arah telur secara alami (seperti pemain sungguhan menatap objek)
+    -- Jika belum tepat di stopDistance tapi sudah dalam jangkauan prompt, tetap lanjut steal!
+    if currentDist > maxActivation then
+        if not arrived then return false end
+    end
+
+    -- Hadapkan karakter ke arah telur secara alami
     pcall(function()
         local lookPos = Vector3.new(targetPart.Position.X, hrp.Position.Y, targetPart.Position.Z)
         hrp.CFrame = CFrame.lookAt(hrp.Position, lookPos)
     end)
 
-    -- Jeda micro-reaction manusiawi sebelum menekan tombol (0.12 - 0.22 detik)
-    task.wait(math.random(12, 22) / 100)
+    -- Jeda micro-reaction manusiawi sebelum menekan tombol (0.05 - 0.12 detik)
+    task.wait(math.random(5, 12) / 100)
 
     local success = false
     pcall(function()
@@ -378,28 +400,27 @@ local function stealEgg(eggObj)
         local holdTime = prompt.HoldDuration or 0
 
         if holdTime > 0 then
-            -- JALUR RESMI: Simulasikan input tombol E ditekan & ditahan sesuai durasi resmi
-            -- Ini memenuhi server-side timestamp check (holds[player] = os.clock()) sehingga TIDAK kena BAC-7581
-            if type(prompt.InputHoldBegin) == "function" and type(prompt.InputHoldEnd) == "function" then
+            if type(fireproximityprompt) == "function" then
+                pcall(function() fireproximityprompt(prompt, holdTime) end)
+                task.wait(holdTime + 0.05)
+                success = true
+            elseif type(prompt.InputHoldBegin) == "function" and type(prompt.InputHoldEnd) == "function" then
                 pcall(function() prompt:InputHoldBegin() end)
                 task.wait(holdTime + 0.1)
                 pcall(function() prompt:InputHoldEnd() end)
                 success = true
-            elseif type(fireproximityprompt) == "function" then
-                pcall(function() fireproximityprompt(prompt, holdTime) end)
-                success = true
             end
         else
-            -- Prompt instan tanpa hold
-            if type(prompt.InputHoldBegin) == "function" and type(prompt.InputHoldEnd) == "function" then
+            if type(fireproximityprompt) == "function" then
+                pcall(function() fireproximityprompt(prompt, 0) end)
+                pcall(function() fireproximityprompt(prompt) end)
+                success = true
+            elseif type(prompt.InputHoldBegin) == "function" and type(prompt.InputHoldEnd) == "function" then
                 pcall(function()
                     prompt:InputHoldBegin()
-                    task.wait(0.06)
+                    task.wait(0.04)
                     prompt:InputHoldEnd()
                 end)
-                success = true
-            elseif type(fireproximityprompt) == "function" then
-                pcall(function() fireproximityprompt(prompt, 0) end)
                 success = true
             end
         end
@@ -1012,7 +1033,7 @@ Window.Size = UDim2.new(0, WIN_W, 0, WIN_H)
 Window.BackgroundColor3 = Theme.Background
 Window.BorderSizePixel = 0
 Window.Active = true
-Window.Visible = false -- Mulai tertutup agar tidak memicu scan overlay dan layar tetap bersih saat execute
+Window.Visible = true -- Langsung terbuka agar menu dan toggle terlihat jelas saat execute
 Window.Parent = ScreenGui
 addCorner(10, Window)
 addStroke(Theme.Accent, 1.2, Window)
@@ -1680,7 +1701,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     end
 end)
 
--- Notifikasi in-game bersih saat execute (Semua toggle OFF, siap diklik)
-showToast("🥚 Yancok Berhasil Dimuat", "Semua fitur OFF. Ketuk tombol 🥚 di layar untuk membuka menu.", 5)
+-- Notifikasi in-game bersih saat execute
+showToast("🥚 Yancok Aktif", "Auto Steal ON! Karakter otomatis mencari & mengambil telur.", 4)
 
 print("[Yancok Stealth] Script aktif dengan proteksi Anti-Cheat! Ketuk tombol 🥚 atau tekan [RightShift] untuk buka/tutup menu.")
