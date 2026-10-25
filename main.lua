@@ -105,43 +105,43 @@ local CFG_FOLDER = "Yancok_StealAnEgg"
 local CFG_PATH   = CFG_FOLDER .. "/config.json"
 
 local Settings = {
-    -- 1. Farm Telur & Stealth (Anti-Deteksi BAC)
-    autoSteal         = false,              -- Default OFF (Aman saat inject, aktifkan di menu saat siap)
-    movementMode      = "Safe Walk",        -- "Safe Walk" (100% Aman BAC-3515 & BAC-4515) | "Smooth Glide" | "Instant CFrame"
-    safeMode          = true,               -- Anti-Cheat Protection (Natural Hold + Jitter)
-    stealDelay        = 0.5,                -- Jeda aman (human-like debounce)
-    maxDistance       = 250,                -- Radius aman pencarian telur (m)
-    autoHatch         = false,              -- Default OFF demi keamanan remote BAC
+    -- 1. Farm Telur & Stealth (100% OFF saat inject)
+    autoSteal         = false,              -- OFF
+    movementMode      = "Safe Walk",        -- "Safe Walk" | "Smooth Glide" | "Instant CFrame"
+    safeMode          = true,               -- Anti-Cheat Protection
+    stealDelay        = 0.5,                -- Jeda aman
+    maxDistance       = 250,                -- Radius aman pencarian telur
+    autoHatch         = false,              -- OFF
     hatchAmount       = 1,
 
-    -- 2. Server Hop (Identik Nasi Rendang)
-    autoHop           = true,
+    -- 2. Server Hop (100% OFF saat inject)
+    autoHop           = false,              -- OFF
     hopWhen           = "Any",              -- "Any" | "After Steal Count" | "Interval" | "No Match"
-    hopNoMatchDelay   = 60,                 -- detik tanpa klaim telur
+    hopNoMatchDelay   = 60,                 -- detik
     hopInterval       = 12,                 -- menit
     hopSteals         = 40,                 -- klaim telur
-    hopMinPlayers     = 3,                  -- min pemain (0 = off)
-    hopMaxPlayers     = 6,                  -- max pemain (0 = off)
-    hopPreferEmpty    = true,               -- prefer server sepi
+    hopMinPlayers     = 3,                  -- min pemain
+    hopMaxPlayers     = 6,                  -- max pemain
+    hopPreferEmpty    = true,
 
-    -- 3. Auto Chat (Identik Nasi Rendang)
-    autoChat          = false,
+    -- 3. Auto Chat (100% OFF saat inject)
+    autoChat          = false,              -- OFF
     chatInterval      = 25,
     chatText          = "Yancok Steal An Egg - 100% Free & Keyless!",
     chatText2         = "Farming Eggs AFK",
     chatText3         = "",
 
-    -- 4. Camera (Identik Nasi Rendang)
-    camLock           = false,
+    -- 4. Camera (100% OFF saat inject)
+    camLock           = false,              -- OFF
     camOffX           = 0,
     camOffY           = 35,
     camOffZ           = 0,
     camFov            = 70,
 
-    -- 5. Misc & FPS (Identik Nasi Rendang)
-    fpsBoost          = false,              -- Default OFF agar tidak memodifikasi integritas map
-    autoAcceptFriends = true,
-    antiAfk           = true,
+    -- 5. Misc & FPS (100% OFF saat inject)
+    fpsBoost          = false,              -- OFF
+    autoAcceptFriends = false,              -- OFF
+    antiAfk           = false,              -- OFF
 }
 
 local function saveConfig()
@@ -159,10 +159,24 @@ local function loadConfig()
             local data = readfile(CFG_PATH)
             local tbl = HttpService:JSONDecode(data)
             if type(tbl) == "table" then
-                for k, v in pairs(tbl) do Settings[k] = v end
+                for k, v in pairs(tbl) do
+                    -- Jangan load status true untuk toggle otomatis agar saat inject 100% diam
+                    if type(v) ~= "boolean" or (not k:find("auto") and k ~= "antiAfk" and k ~= "fpsBoost" and k ~= "camLock") then
+                        Settings[k] = v
+                    end
+                end
             end
         end
     end)
+    -- Paksa semua aksi otomatis TETAP MATI (OFF) saat script baru dieksekusi:
+    Settings.autoSteal         = false
+    Settings.autoHop           = false
+    Settings.autoHatch         = false
+    Settings.autoChat          = false
+    Settings.camLock           = false
+    Settings.fpsBoost          = false
+    Settings.autoAcceptFriends = false
+    Settings.antiAfk           = false
 end
 loadConfig()
 
@@ -176,64 +190,22 @@ local function registerClaim()
     lastClaimTime = os.clock()
 end
 
--- Deteksi remote event klaim telur (Tahan update game)
+-- Deteksi pasif remote klaim telur (Hanya mendengarkan event yang tiba secara alami)
 do
-    local function hookRemote(ev)
-        if ev and ev:IsA("RemoteEvent") then
-            ev.OnClientEvent:Connect(function(res)
-                if res == nil or res == true or (type(res) == "table" and res.Ok ~= false) then
-                    registerClaim()
-                end
-            end)
-        end
-    end
-
     pcall(function()
         local net = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Networking")
         if net then
             for _, c in ipairs(net:GetChildren()) do
-                local n = string.lower(c.Name)
-                if string.find(n, "egg") or string.find(n, "redeem") or string.find(n, "verdict") or string.find(n, "claim") then
-                    hookRemote(c)
-                end
-            end
-        end
-    end)
-
-    -- Fallback scan seluruh ReplicatedStorage
-    pcall(function()
-        for _, c in ipairs(ReplicatedStorage:GetDescendants()) do
-            local n = string.lower(c.Name)
-            if c:IsA("RemoteEvent") and (string.find(n, "fieldeggredeem") or string.find(n, "eggclaim") or string.find(n, "eggworld")) then
-                hookRemote(c)
-            end
-        end
-    end)
-
-    -- Cadangan: polling telur milik pemain
-    task.spawn(function()
-        local ES
-        pcall(function() ES = require(ReplicatedStorage.Client.EggState) end)
-        if ES and type(ES.ReadOwnedEggs) == "function" then
-            local function countEggs()
-                local count = 0
-                pcall(function()
-                    for _, egg in pairs(ES.ReadOwnedEggs() or {}) do
-                        if type(egg) == "table" and egg.OwnerUserId == LocalPlayer.UserId and type(egg.Records) == "table" then
-                            for _ in pairs(egg.Records) do count = count + 1 end
-                        end
+                if c:IsA("RemoteEvent") then
+                    local n = string.lower(c.Name)
+                    if string.find(n, "egg") or string.find(n, "redeem") or string.find(n, "claim") then
+                        c.OnClientEvent:Connect(function(res)
+                            if res == nil or res == true or (type(res) == "table" and res.Ok ~= false) then
+                                registerClaim()
+                            end
+                        end)
                     end
-                end)
-                return count
-            end
-            local prev = countEggs()
-            while getgenv()[SCRIPT_ID] == RUN_ID do
-                task.wait(2)
-                local cur = countEggs()
-                if cur > prev then
-                    for _ = 1, (cur - prev) do registerClaim() end
                 end
-                prev = cur
             end
         end
     end)
