@@ -45,25 +45,83 @@ local PLACE_ID    = game.PlaceId
 local CURRENT_JOB = game.JobId
 
 -- ======================== CLIENT ANTI-CHEAT NEUTRALIZER ====================
--- Mencegah client script game menendang (kick) player saat terdeteksi
+-- Mencegah client script game mendeteksi dan melaporkan cheat (BAC-3515, BAC-4515, BAC-7581)
 pcall(function()
     if hookmetamethod then
         local oldNamecall
         oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-            local method = getnamecallmethod()
-            if tostring(method):lower() == "kick" and self == LocalPlayer then
+            local method = tostring(getnamecallmethod()):lower()
+            local args = {...}
+
+            -- 1. Blokir panggilan Kick() langsung dari LocalPlayer
+            if method == "kick" and (self == LocalPlayer or tostring(self) == tostring(LocalPlayer)) then
                 warn("[Yancok Stealth] Deteksi client-side diblokir (Kick dicegah)!")
                 return
             end
+
+            -- 2. Blokir pengiriman paket deteksi anti-cheat ke server (BAC report filter)
+            if method == "fireserver" or method == "invokeserver" then
+                local remoteName = tostring(self.Name):lower()
+
+                -- Cek nama remote mencurigakan / honeypot anti-cheat
+                if remoteName:find("bac") or remoteName:find("anticheat") or remoteName:find("security") or remoteName:find("report") or remoteName:find("flag") or remoteName:find("detection") or remoteName:find("ban") or remoteName:find("kick") then
+                    warn("[Yancok Stealth] Remote security/report diblokir:", self.Name)
+                    return
+                end
+
+                -- Cek argumen berisi kode BAC atau kata kunci pelanggaran
+                for _, arg in ipairs(args) do
+                    local str = tostring(arg):lower()
+                    if str:find("bac") or str:find("cheat") or str:find("exploit") or str:find("speed") or str:find("teleport") or str:find("noclip") or str:find("fly") or str:find("prompt") or str:find("3515") or str:find("4515") or str:find("7581") then
+                        warn("[Yancok Stealth] Paket laporan pelanggaran BAC dibuang:", self.Name, str)
+                        return
+                    end
+                end
+            end
+
             return oldNamecall(self, ...)
         end)
     end
+
     if hookfunction and LocalPlayer.Kick then
         hookfunction(LocalPlayer.Kick, function(self, ...)
             warn("[Yancok Stealth] LocalPlayer:Kick() langsung dibatalkan!")
             return
         end)
     end
+end)
+
+-- Scan dan nonaktifkan LocalScript anti-cheat jika ada di PlayerScripts / Character
+pcall(function()
+    local function neutralScript(s)
+        if s and s:IsA("LocalScript") then
+            local n = s.Name:lower()
+            if n:find("bac") or n:find("anticheat") or n:find("security") or n:find("cheat") or n:find("detector") then
+                pcall(function() s.Disabled = true end)
+                warn("[Yancok Stealth] Script anti-cheat dinonaktifkan:", s.Name)
+            end
+        end
+    end
+
+    if LocalPlayer:FindFirstChild("PlayerScripts") then
+        for _, s in ipairs(LocalPlayer.PlayerScripts:GetDescendants()) do
+            neutralScript(s)
+        end
+        LocalPlayer.PlayerScripts.DescendantAdded:Connect(neutralScript)
+    end
+
+    if LocalPlayer.Character then
+        for _, s in ipairs(LocalPlayer.Character:GetDescendants()) do
+            neutralScript(s)
+        end
+    end
+    LocalPlayer.CharacterAdded:Connect(function(chr)
+        task.wait(0.5)
+        for _, s in ipairs(chr:GetDescendants()) do
+            neutralScript(s)
+        end
+        chr.DescendantAdded:Connect(neutralScript)
+    end)
 end)
 
 -- ============================ CONTAINER PROTEKSI ============================
@@ -127,11 +185,11 @@ local CFG_PATH   = CFG_FOLDER .. "/config.json"
 
 local Settings = {
     -- 1. Farm Telur & Stealth (Anti-Deteksi BAC)
-    autoSteal         = true,
-    movementMode      = "Smooth Glide",     -- "Smooth Glide" | "Safe Walk" | "Instant CFrame"
+    autoSteal         = false,              -- Default OFF (Aman saat inject, aktifkan di menu saat siap)
+    movementMode      = "Safe Walk",        -- "Safe Walk" (100% Aman BAC-3515 & BAC-4515) | "Smooth Glide" | "Instant CFrame"
     safeMode          = true,               -- Anti-Cheat Protection (Natural Hold + Jitter)
     stealDelay        = 0.5,                -- Jeda aman (human-like debounce)
-    maxDistance       = 300,                -- Radius aman pencarian telur (m)
+    maxDistance       = 250,                -- Radius aman pencarian telur (m)
     autoHatch         = false,              -- Default OFF demi keamanan remote BAC
     hatchAmount       = 1,
 
@@ -328,16 +386,16 @@ local function moveToTarget(targetPos)
     local dist = (hrp.Position - targetPos).Magnitude
     if dist <= 3.5 then return true end
 
-    local mode = Settings.movementMode or "Smooth Glide"
+    local mode = Settings.movementMode or "Safe Walk"
 
     if mode == "Safe Walk" then
-        -- 100% Menggunakan Navigasi Fisik Humanoid Roblox Asli (Tidak memicu delta CFrame)
+        -- 100% Menggunakan Navigasi Fisik Humanoid Roblox Asli (Tidak memicu delta CFrame, bebas BAC-3515 & BAC-4515)
         hum:MoveTo(targetPos)
         local t0 = os.clock()
         local ws = (hum.WalkSpeed and hum.WalkSpeed > 0) and hum.WalkSpeed or 16
         local maxWait = math.clamp(dist / ws, 0.8, 6.0)
         while (os.clock() - t0) < maxWait do
-            if not chr or not hrp or (hrp.Position - targetPos).Magnitude <= 3.5 then
+            if not chr or not hrp or (hrp.Position - targetPos).Magnitude <= 3.8 then
                 return true
             end
             task.wait(0.1)
@@ -345,18 +403,19 @@ local function moveToTarget(targetPos)
         return (hrp.Position - targetPos).Magnitude <= 6.0
 
     elseif mode == "Smooth Glide" then
-        -- Interpolasi Halus & Kontinu (Kecepatan 34 studs/detik, menyerupai lari alami)
-        local speed = 34
-        local duration = math.clamp(dist / speed, 0.15, 2.8)
+        -- Kecepatan lari alami terkalibrasi (18 studs/detik, sejajar tanah, tidak memicu Freefall)
+        local speed = 18
+        local duration = math.clamp(dist / speed, 0.2, 3.5)
         local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-        local tween = TweenService:Create(hrp, tweenInfo, { CFrame = CFrame.new(targetPos + Vector3.new(0, 1.5, 0)) })
+        local groundTarget = Vector3.new(targetPos.X, hrp.Position.Y, targetPos.Z)
+        local tween = TweenService:Create(hrp, tweenInfo, { CFrame = CFrame.new(groundTarget) })
         tween:Play()
         task.wait(duration)
         return true
 
     else
         -- Instant CFrame (Direct Snap - gunakan jika di private server / ingin tercepat)
-        hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 2.0, 0))
+        hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 1.0, 0))
         task.wait(0.04)
         return true
     end
@@ -383,7 +442,7 @@ local function stealEgg(eggObj)
     if not arrived then return false end
 
     -- Jeda jeda kecil agar server sempat mereplikasi posisi koordinat karakter (Penting untuk BAC Distance Check)
-    task.wait(0.12)
+    task.wait(0.15)
 
     local success = false
     pcall(function()
@@ -394,33 +453,28 @@ local function stealEgg(eggObj)
             if holdTime > 0 then
                 -- JALUR RESMI: Simulasikan input tombol E ditekan & ditahan sesuai durasi resmi
                 -- Ini memenuhi server-side timestamp check (holds[player] = os.clock()) sehingga TIDAK kena BAC-7581
-                if type(prompt.InputHoldBegin) == "function" then
+                if type(prompt.InputHoldBegin) == "function" and type(prompt.InputHoldEnd) == "function" then
                     pcall(function() prompt:InputHoldBegin() end)
-                end
-
-                -- Tunggu durasi hold asli + toleransi 0.08 detik (Sesuai validasi server)
-                task.wait(holdTime + 0.08)
-
-                if type(prompt.InputHoldEnd) == "function" then
+                    task.wait(holdTime + 0.1)
                     pcall(function() prompt:InputHoldEnd() end)
-                end
-
-                if type(fireproximityprompt) == "function" then
+                    success = true
+                elseif type(fireproximityprompt) == "function" then
                     pcall(function() fireproximityprompt(prompt, holdTime) end)
+                    success = true
                 end
-                success = true
             else
                 -- Prompt instan tanpa hold
-                if type(fireproximityprompt) == "function" then
-                    pcall(function() fireproximityprompt(prompt) end)
-                else
+                if type(prompt.InputHoldBegin) == "function" and type(prompt.InputHoldEnd) == "function" then
                     pcall(function()
                         prompt:InputHoldBegin()
-                        task.wait(0.05)
+                        task.wait(0.06)
                         prompt:InputHoldEnd()
                     end)
+                    success = true
+                elseif type(fireproximityprompt) == "function" then
+                    pcall(function() fireproximityprompt(prompt, 0) end)
+                    success = true
                 end
-                success = true
             end
         end
     end)
@@ -1396,7 +1450,7 @@ end
 local farmL, farmR = makePage("Farm Telur", 1)
 section(farmL, "Auto Steal Telur")
 toggle(farmL, "Auto Steal Telur", "autoSteal")
-dropdown(farmL, "Metode Gerak (Anti-Cheat)", "movementMode", { "Smooth Glide", "Safe Walk", "Instant CFrame" })
+dropdown(farmL, "Metode Gerak (Anti-Cheat)", "movementMode", { "Safe Walk", "Smooth Glide", "Instant CFrame" })
 toggle(farmL, "Mode Stealth (Anti-Deteksi)", "safeMode")
 slider(farmL, "Jeda Ambil Telur (s)", "stealDelay", 0.1, 1.5, 0.05)
 slider(farmL, "Jarak Maksimal (m)", "maxDistance", 50, 600, 25)
