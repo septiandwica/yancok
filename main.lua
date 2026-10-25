@@ -728,7 +728,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ================================= GUI PANEL ================================
--- Layout Horizontal 2-Kolom Berbasis Tab (Persis Nasi Rendang, Posisi Tengah Layar)
+-- Layout Horizontal 2-Kolom Berbasis Tab (Super Rapih, Modern, Posisi Tengah Layar)
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "YancokEgg_Panel"
 ScreenGui.ResetOnSpawn = false
@@ -750,18 +750,41 @@ local function addStroke(col, th, p)
     return s
 end
 
+-- =========================== TOP CENTER OVERLAY HUD =========================
+local OverlayHud = Instance.new("Frame")
+OverlayHud.Name = "NextHopOverlay"
+OverlayHud.AnchorPoint = Vector2.new(0.5, 0)
+OverlayHud.Position = UDim2.new(0.5, 0, 0, 14)
+OverlayHud.Size = UDim2.new(0, 300, 0, 28)
+OverlayHud.BackgroundColor3 = Theme.Header
+OverlayHud.BackgroundTransparency = 0.15
+OverlayHud.BorderSizePixel = 0
+OverlayHud.Parent = ScreenGui
+addCorner(14, OverlayHud)
+addStroke(Theme.Accent, 1, OverlayHud)
+
+local OverlayLbl = Instance.new("TextLabel")
+OverlayLbl.Text = "⚡ YANCOK: 0 TELUR TERCURI"
+OverlayLbl.Font = FONT_BOLD
+OverlayLbl.TextSize = 11
+OverlayLbl.TextColor3 = Theme.Text
+OverlayLbl.Size = UDim2.new(1, 0, 1, 0)
+OverlayLbl.BackgroundTransparency = 1
+OverlayLbl.Parent = OverlayHud
+
 -- =========================== FLOATING MINI BADGE ============================
 local MiniBar = Instance.new("Frame")
 MiniBar.Name = "MiniBar"
 MiniBar.AnchorPoint = Vector2.new(0.5, 1)
-MiniBar.Position = UDim2.new(0.5, 0, 1, -15)
-MiniBar.Size = UDim2.new(0, 180, 0, 28)
-MiniBar.BackgroundColor3 = Theme.Background
+MiniBar.Position = UDim2.new(0.5, 0, 1, -14)
+MiniBar.Size = UDim2.new(0, 190, 0, 30)
+MiniBar.BackgroundColor3 = Theme.Header
+MiniBar.BackgroundTransparency = 0.15
 MiniBar.BorderSizePixel = 0
 MiniBar.Active = true
 MiniBar.Visible = false
 MiniBar.Parent = ScreenGui
-addCorner(8, MiniBar)
+addCorner(15, MiniBar)
 addStroke(Theme.Accent, 1.2, MiniBar)
 
 local MiniLabel = Instance.new("TextLabel")
@@ -780,7 +803,7 @@ MiniBtn.Text = ""
 MiniBtn.Parent = MiniBar
 
 -- =========================== MAIN WINDOW (CENTERED) =========================
-local WIN_W, WIN_H = 620, 260
+local WIN_W, WIN_H = 600, 340
 local Window = Instance.new("Frame")
 Window.Name = "Window"
 Window.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -799,8 +822,8 @@ WinScale.Parent = Window
 local function updateScale()
     pcall(function()
         local vp = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize
-        if vp and (vp.X < 680 or vp.Y < 380) then
-            WinScale.Scale = math.clamp(math.min(vp.X / 680, vp.Y / 320), 0.55, 0.95)
+        if vp and (vp.X < 660 or vp.Y < 400) then
+            WinScale.Scale = math.clamp(math.min(vp.X / 660, vp.Y / 380), 0.55, 0.95)
         else
             WinScale.Scale = 1
         end
@@ -846,7 +869,7 @@ makeDraggable(MiniBar, MiniBar)
 -- TopBar
 local TopBar = Instance.new("Frame")
 TopBar.Name = "TopBar"
-TopBar.Size = UDim2.new(1, 0, 0, 36)
+TopBar.Size = UDim2.new(1, 0, 0, 38)
 TopBar.BackgroundColor3 = Theme.Header
 TopBar.BorderSizePixel = 0
 TopBar.Parent = Window
@@ -870,7 +893,7 @@ MinBtn.Font = FONT_BOLD
 MinBtn.TextSize = 12
 MinBtn.TextColor3 = Theme.TextSub
 MinBtn.Size = UDim2.new(0, 24, 0, 24)
-MinBtn.Position = UDim2.new(1, -56, 0, 6)
+MinBtn.Position = UDim2.new(1, -56, 0, 7)
 MinBtn.BackgroundColor3 = Theme.Card
 MinBtn.BorderSizePixel = 0
 MinBtn.Parent = TopBar
@@ -885,7 +908,7 @@ CloseBtn.Font = FONT_BOLD
 CloseBtn.TextSize = 11
 CloseBtn.TextColor3 = Theme.TextSub
 CloseBtn.Size = UDim2.new(0, 24, 0, 24)
-CloseBtn.Position = UDim2.new(1, -28, 0, 6)
+CloseBtn.Position = UDim2.new(1, -28, 0, 7)
 CloseBtn.BackgroundColor3 = Theme.Card
 CloseBtn.BorderSizePixel = 0
 CloseBtn.Parent = TopBar
@@ -894,31 +917,37 @@ CloseBtn.MouseButton1Click:Connect(function()
     setMinimized(true)
 end)
 
--- ---- TAB BAR HORIZONTAL ----
-local TabBar = Instance.new("Frame")
-TabBar.Size = UDim2.new(1, -16, 0, 28)
-TabBar.Position = UDim2.new(0, 8, 0, 42)
-TabBar.BackgroundTransparency = 1
-TabBar.Parent = Window
+-- ---- TAB BAR CONTAINER (RAPIS & BERSIH) ----
+local TabBarFrame = Instance.new("Frame")
+TabBarFrame.Size = UDim2.new(1, -20, 0, 32)
+TabBarFrame.Position = UDim2.new(0, 10, 0, 46)
+TabBarFrame.BackgroundColor3 = Theme.Header
+TabBarFrame.BackgroundTransparency = 0.4
+TabBarFrame.BorderSizePixel = 0
+TabBarFrame.Parent = Window
+addCorner(8, TabBarFrame)
+addStroke(Theme.Border, 1, TabBarFrame)
 
 local TabList = Instance.new("UIListLayout")
 TabList.FillDirection = Enum.FillDirection.Horizontal
-TabList.Padding = UDim.new(0, 6)
+TabList.Padding = UDim.new(0, 4)
 TabList.SortOrder = Enum.SortOrder.LayoutOrder
-TabList.Parent = TabBar
+TabList.Parent = TabBarFrame
 
 local Pages, TabBtns, activeTab = {}, {}, nil
 local ContentHost = Instance.new("Frame")
-ContentHost.Size = UDim2.new(1, -16, 1, -80)
-ContentHost.Position = UDim2.new(0, 8, 0, 74)
+ContentHost.Size = UDim2.new(1, -20, 1, -90)
+ContentHost.Position = UDim2.new(0, 10, 0, 84)
 ContentHost.BackgroundTransparency = 1
 ContentHost.Parent = Window
 
 local function showTab(name)
     for n, pg in pairs(Pages) do pg.Visible = (n == name) end
     for n, b in pairs(TabBtns) do
-        b.BackgroundColor3 = (n == name) and Theme.Accent or Theme.Card
-        b.TextColor3 = (n == name) and Color3.fromRGB(0, 0, 0) or Theme.TextSub
+        local isSel = (n == name)
+        b.BackgroundColor3 = isSel and Theme.Accent or Theme.Header
+        b.BackgroundTransparency = isSel and 0 or 1
+        b.TextColor3 = isSel and Color3.fromRGB(15, 17, 21) or Theme.TextSub
     end
     activeTab = name
 end
@@ -943,7 +972,7 @@ local function makePage(name, order)
         c.AutomaticCanvasSize = Enum.AutomaticSize.Y
         c.Parent = pg
         local l = Instance.new("UIListLayout")
-        l.Padding = UDim.new(0, 5)
+        l.Padding = UDim.new(0, 6)
         l.Parent = c
         return c
     end
@@ -952,16 +981,18 @@ local function makePage(name, order)
     Pages[name] = pg
 
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 108, 1, 0)
+    btn.Size = UDim2.new(0.2, -4, 1, -4)
+    btn.Position = UDim2.new(0, 2, 0, 2)
     btn.LayoutOrder = order
-    btn.BackgroundColor3 = Theme.Card
+    btn.BackgroundColor3 = Theme.Header
+    btn.BackgroundTransparency = 1
     btn.BorderSizePixel = 0
     btn.Font = FONT_BOLD
     btn.Text = name
     btn.TextSize = 11.5
     btn.TextColor3 = Theme.TextSub
     btn.AutoButtonColor = false
-    btn.Parent = TabBar
+    btn.Parent = TabBarFrame
     addCorner(6, btn)
 
     btn.MouseButton1Click:Connect(function() showTab(name) end)
@@ -969,50 +1000,68 @@ local function makePage(name, order)
     return L, R
 end
 
--- ======================== HELPER KOMPONEN UI ================================
+-- ======================== HELPER KOMPONEN UI RAPIH ==========================
 local function section(parent, text)
+    local header = Instance.new("Frame")
+    header.Size = UDim2.new(1, -4, 0, 20)
+    header.BackgroundTransparency = 1
+    header.Parent = parent
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.new(0, 3, 0, 12)
+    bar.Position = UDim2.new(0, 2, 0.5, -6)
+    bar.BackgroundColor3 = Theme.Accent
+    bar.BorderSizePixel = 0
+    bar.Parent = header
+    addCorner(2, bar)
+
     local l = Instance.new("TextLabel")
-    l.Size = UDim2.new(1, -8, 0, 18)
+    l.Size = UDim2.new(1, -12, 1, 0)
+    l.Position = UDim2.new(0, 10, 0, 0)
     l.BackgroundTransparency = 1
     l.Font = FONT_BOLD
     l.Text = string.upper(text)
-    l.TextColor3 = Theme.TextSub
-    l.TextSize = 10.5
+    l.TextColor3 = Theme.Accent
+    l.TextSize = 10
     l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = parent
-    return l
+    l.Parent = header
+    return header
 end
 
 local function toggle(parent, label, key)
-    local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, -8, 0, 26)
-    row.BackgroundTransparency = 1
-    row.Parent = parent
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, -4, 0, 36)
+    card.BackgroundColor3 = Theme.Card
+    card.BackgroundTransparency = 0.25
+    card.BorderSizePixel = 0
+    card.Parent = parent
+    addCorner(6, card)
+    addStroke(Theme.Border, 1, card)
 
     local l = Instance.new("TextLabel")
-    l.Size = UDim2.new(1, -50, 1, 0)
-    l.Position = UDim2.new(0, 2, 0, 0)
+    l.Size = UDim2.new(1, -55, 1, 0)
+    l.Position = UDim2.new(0, 10, 0, 0)
     l.BackgroundTransparency = 1
     l.Font = FONT_MED
     l.Text = label
     l.TextColor3 = Theme.Text
-    l.TextSize = 12
+    l.TextSize = 11.5
     l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = row
+    l.Parent = card
 
     local pill = Instance.new("Frame")
-    pill.Size = UDim2.new(0, 40, 0, 20)
-    pill.Position = UDim2.new(1, -42, 0.5, -10)
-    pill.BackgroundColor3 = Settings[key] and Theme.Accent or Theme.Border
+    pill.Size = UDim2.new(0, 38, 0, 20)
+    pill.Position = UDim2.new(1, -48, 0.5, -10)
+    pill.BackgroundColor3 = Settings[key] and Theme.Accent or Theme.Control
     pill.BorderSizePixel = 0
-    pill.Parent = row
+    pill.Parent = card
     addCorner(10, pill)
 
     local knob = Instance.new("Frame")
     knob.Size = UDim2.new(0, 14, 0, 14)
     knob.AnchorPoint = Vector2.new(0.5, 0.5)
-    knob.Position = Settings[key] and UDim2.new(1, -7, 0.5, 0) or UDim2.new(0, 7, 0.5, 0)
-    knob.BackgroundColor3 = Settings[key] and Color3.new(0, 0, 0) or Theme.Text
+    knob.Position = Settings[key] and UDim2.new(1, -8, 0.5, 0) or UDim2.new(0, 8, 0.5, 0)
+    knob.BackgroundColor3 = Settings[key] and Color3.new(0, 0, 0) or Theme.TextSub
     knob.BorderSizePixel = 0
     knob.Parent = pill
     addCorner(7, knob)
@@ -1022,73 +1071,91 @@ local function toggle(parent, label, key)
     btn.BackgroundTransparency = 1
     btn.Text = ""
     btn.AutoButtonColor = false
-    btn.Parent = row
+    btn.Parent = card
 
     btn.MouseButton1Click:Connect(function()
         Settings[key] = not Settings[key]
-        pill.BackgroundColor3 = Settings[key] and Theme.Accent or Theme.Border
-        knob.Position = Settings[key] and UDim2.new(1, -7, 0.5, 0) or UDim2.new(0, 7, 0.5, 0)
-        knob.BackgroundColor3 = Settings[key] and Color3.new(0, 0, 0) or Theme.Text
+        pill.BackgroundColor3 = Settings[key] and Theme.Accent or Theme.Control
+        knob.Position = Settings[key] and UDim2.new(1, -8, 0.5, 0) or UDim2.new(0, 8, 0.5, 0)
+        knob.BackgroundColor3 = Settings[key] and Color3.new(0, 0, 0) or Theme.TextSub
         saveConfig()
         if key == "fpsBoost" and Settings.fpsBoost then applyFpsBoost() end
     end)
-    return row
+    return card
 end
 
 local function slider(parent, label, key, minV, maxV, step)
-    local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, -8, 0, 38)
-    row.BackgroundTransparency = 1
-    row.Parent = parent
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, -4, 0, 46)
+    card.BackgroundColor3 = Theme.Card
+    card.BackgroundTransparency = 0.25
+    card.BorderSizePixel = 0
+    card.Parent = parent
+    addCorner(6, card)
+    addStroke(Theme.Border, 1, card)
 
     local val = Settings[key] or minV
 
     local l = Instance.new("TextLabel")
-    l.Size = UDim2.new(1, -50, 0, 16)
-    l.Position = UDim2.new(0, 2, 0, 0)
+    l.Size = UDim2.new(1, -60, 0, 16)
+    l.Position = UDim2.new(0, 10, 0, 6)
     l.BackgroundTransparency = 1
     l.Font = FONT_MED
     l.Text = label
     l.TextColor3 = Theme.Text
-    l.TextSize = 11.5
+    l.TextSize = 11
     l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = row
+    l.Parent = card
+
+    local badge = Instance.new("Frame")
+    badge.Size = UDim2.new(0, 42, 0, 16)
+    badge.Position = UDim2.new(1, -50, 0, 6)
+    badge.BackgroundColor3 = Theme.Control
+    badge.BorderSizePixel = 0
+    badge.Parent = card
+    addCorner(4, badge)
 
     local valLbl = Instance.new("TextLabel")
-    valLbl.Size = UDim2.new(0, 44, 0, 16)
-    valLbl.Position = UDim2.new(1, -44, 0, 0)
+    valLbl.Size = UDim2.new(1, 0, 1, 0)
     valLbl.BackgroundTransparency = 1
     valLbl.Font = FONT_BOLD
     valLbl.Text = tostring(val)
     valLbl.TextColor3 = Theme.Accent
-    valLbl.TextSize = 11.5
-    valLbl.TextXAlignment = Enum.TextXAlignment.Right
-    valLbl.Parent = row
+    valLbl.TextSize = 10.5
+    valLbl.TextXAlignment = Enum.TextXAlignment.Center
+    valLbl.Parent = badge
 
     local track = Instance.new("Frame")
-    track.Size = UDim2.new(1, -6, 0, 6)
-    track.Position = UDim2.new(0, 3, 0, 24)
-    track.BackgroundColor3 = Theme.Border
+    track.Size = UDim2.new(1, -20, 0, 5)
+    track.Position = UDim2.new(0, 10, 0, 30)
+    track.BackgroundColor3 = Theme.Control
     track.BorderSizePixel = 0
-    track.Parent = row
+    track.Parent = card
     addCorner(3, track)
 
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((val - minV) / math.max(1, maxV - minV), 0, 1, 0)
+    fill.BackgroundColor3 = Theme.Accent
+    fill.BorderSizePixel = 0
+    fill.Parent = track
+    addCorner(3, fill)
+
     local knob = Instance.new("Frame")
-    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.Size = UDim2.new(0, 13, 0, 13)
     knob.AnchorPoint = Vector2.new(0.5, 0.5)
-    knob.Position = UDim2.new((val - minV) / math.max(1, maxV - minV), 0, 0.5, 0)
-    knob.BackgroundColor3 = Theme.Text
+    knob.Position = UDim2.new(1, 0, 0.5, 0)
+    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     knob.BorderSizePixel = 0
-    knob.Parent = track
+    knob.Parent = fill
     addCorner(7, knob)
 
     local hit = Instance.new("TextButton")
-    hit.Size = UDim2.new(1, 0, 0, 22)
-    hit.Position = UDim2.new(0, 0, 0, 16)
+    hit.Size = UDim2.new(1, 0, 0, 20)
+    hit.Position = UDim2.new(0, 0, 0, 22)
     hit.BackgroundTransparency = 1
     hit.Text = ""
     hit.AutoButtonColor = false
-    hit.Parent = row
+    hit.Parent = card
 
     hit.InputBegan:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
@@ -1102,37 +1169,42 @@ local function slider(parent, label, key, minV, maxV, step)
             end
             Settings[key] = math.clamp(v, minV, maxV)
             valLbl.Text = tostring(Settings[key])
-            knob.Position = UDim2.new((Settings[key] - minV) / math.max(1, maxV - minV), 0, 0.5, 0)
+            fill.Size = UDim2.new((Settings[key] - minV) / math.max(1, maxV - minV), 0, 1, 0)
             saveConfig()
         end
     end)
 
     return function()
         valLbl.Text = tostring(Settings[key])
-        knob.Position = UDim2.new((Settings[key] - minV) / math.max(1, maxV - minV), 0, 0.5, 0)
+        fill.Size = UDim2.new((Settings[key] - minV) / math.max(1, maxV - minV), 0, 1, 0)
     end
 end
 
 local function textbox(parent, label, key)
-    local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, -8, 0, 26)
-    row.BackgroundTransparency = 1
-    row.Parent = parent
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, -4, 0, 36)
+    card.BackgroundColor3 = Theme.Card
+    card.BackgroundTransparency = 0.25
+    card.BorderSizePixel = 0
+    card.Parent = parent
+    addCorner(6, card)
+    addStroke(Theme.Border, 1, card)
 
     local l = Instance.new("TextLabel")
     l.Size = UDim2.new(0.38, 0, 1, 0)
+    l.Position = UDim2.new(0, 10, 0, 0)
     l.BackgroundTransparency = 1
     l.Font = FONT_MED
     l.Text = label
     l.TextColor3 = Theme.Text
     l.TextSize = 11.5
     l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = row
+    l.Parent = card
 
     local box = Instance.new("TextBox")
-    box.Size = UDim2.new(0.62, -4, 1, 0)
-    box.Position = UDim2.new(0.38, 4, 0, 0)
-    box.BackgroundColor3 = Theme.Card
+    box.Size = UDim2.new(0.62, -18, 0, 24)
+    box.Position = UDim2.new(0.38, 8, 0.5, -12)
+    box.BackgroundColor3 = Theme.Control
     box.BorderSizePixel = 0
     box.Font = FONT_REG
     box.Text = Settings[key] or ""
@@ -1142,7 +1214,7 @@ local function textbox(parent, label, key)
     box.TextSize = 11
     box.ClearTextOnFocus = false
     box.TextXAlignment = Enum.TextXAlignment.Left
-    box.Parent = row
+    box.Parent = card
     addCorner(6, box)
 
     box.FocusLost:Connect(function()
@@ -1152,32 +1224,37 @@ local function textbox(parent, label, key)
 end
 
 local function dropdown(parent, label, key, options)
-    local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, -8, 0, 26)
-    row.BackgroundTransparency = 1
-    row.Parent = parent
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, -4, 0, 36)
+    card.BackgroundColor3 = Theme.Card
+    card.BackgroundTransparency = 0.25
+    card.BorderSizePixel = 0
+    card.Parent = parent
+    addCorner(6, card)
+    addStroke(Theme.Border, 1, card)
 
     local l = Instance.new("TextLabel")
     l.Size = UDim2.new(0.44, 0, 1, 0)
+    l.Position = UDim2.new(0, 10, 0, 0)
     l.BackgroundTransparency = 1
     l.Font = FONT_MED
     l.Text = label
     l.TextColor3 = Theme.Text
     l.TextSize = 11.5
     l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = row
+    l.Parent = card
 
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.56, -4, 1, 0)
-    btn.Position = UDim2.new(0.44, 4, 0, 0)
-    btn.BackgroundColor3 = Theme.Card
+    btn.Size = UDim2.new(0.56, -18, 0, 24)
+    btn.Position = UDim2.new(0.44, 8, 0.5, -12)
+    btn.BackgroundColor3 = Theme.Control
     btn.BorderSizePixel = 0
     btn.Font = FONT_BOLD
     btn.Text = tostring(Settings[key])
-    btn.TextSize = 11.5
+    btn.TextSize = 11
     btn.TextColor3 = Theme.Accent
     btn.AutoButtonColor = false
-    btn.Parent = row
+    btn.Parent = card
     addCorner(6, btn)
 
     btn.MouseButton1Click:Connect(function()
@@ -1195,7 +1272,7 @@ end
 
 local function button(parent, label, onClick)
     local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1, -8, 0, 28)
+    b.Size = UDim2.new(1, -4, 0, 32)
     b.BackgroundColor3 = Theme.AccentDim
     b.BorderSizePixel = 0
     b.Font = FONT_BOLD
@@ -1222,19 +1299,22 @@ section(farmR, "Auto Hatch & Klaim")
 toggle(farmR, "Auto Hatch Telur", "autoHatch")
 dropdown(farmR, "Jumlah Sekali Hatch", "hatchAmount", { 1, 3, 8 })
 
+section(farmR, "Statistik Farm")
 local ClaimsCard = Instance.new("Frame")
-ClaimsCard.Size = UDim2.new(1, -8, 0, 42)
+ClaimsCard.Size = UDim2.new(1, -4, 0, 48)
 ClaimsCard.BackgroundColor3 = Theme.Card
+ClaimsCard.BackgroundTransparency = 0.25
 ClaimsCard.BorderSizePixel = 0
 ClaimsCard.Parent = farmR
 addCorner(6, ClaimsCard)
+addStroke(Theme.Border, 1, ClaimsCard)
 
 local EggCountLbl = Instance.new("TextLabel")
 EggCountLbl.Text = "Telur Terklaim: 0"
 EggCountLbl.Font = FONT_BOLD
 EggCountLbl.TextSize = 13
 EggCountLbl.TextColor3 = Theme.Green
-EggCountLbl.Position = UDim2.new(0, 10, 0, 4)
+EggCountLbl.Position = UDim2.new(0, 10, 0, 6)
 EggCountLbl.Size = UDim2.new(1, -20, 0, 18)
 EggCountLbl.TextXAlignment = Enum.TextXAlignment.Left
 EggCountLbl.BackgroundTransparency = 1
@@ -1245,7 +1325,7 @@ EggRateLbl.Text = "Status: 100% Standalone | Bebas Key"
 EggRateLbl.Font = FONT_REG
 EggRateLbl.TextSize = 10
 EggRateLbl.TextColor3 = Theme.TextSub
-EggRateLbl.Position = UDim2.new(0, 10, 0, 22)
+EggRateLbl.Position = UDim2.new(0, 10, 0, 26)
 EggRateLbl.Size = UDim2.new(1, -20, 0, 16)
 EggRateLbl.TextXAlignment = Enum.TextXAlignment.Left
 EggRateLbl.BackgroundTransparency = 1
@@ -1279,25 +1359,36 @@ button(hopR, "🚀 Hop Server Sekarang", function()
     end)
 end)
 
+local StatCard = Instance.new("Frame")
+StatCard.Size = UDim2.new(1, -4, 0, 42)
+StatCard.BackgroundColor3 = Theme.Card
+StatCard.BackgroundTransparency = 0.25
+StatCard.BorderSizePixel = 0
+StatCard.Parent = hopR
+addCorner(6, StatCard)
+addStroke(Theme.Border, 1, StatCard)
+
 hopCountLbl = Instance.new("TextLabel")
-hopCountLbl.Size = UDim2.new(1, -8, 0, 16)
+hopCountLbl.Size = UDim2.new(1, -16, 0, 18)
+hopCountLbl.Position = UDim2.new(0, 8, 0, 4)
 hopCountLbl.BackgroundTransparency = 1
 hopCountLbl.Font = FONT_MED
 hopCountLbl.Text = "hop off"
-hopCountLbl.TextColor3 = Theme.TextSub
-hopCountLbl.TextSize = 11.5
+hopCountLbl.TextColor3 = Theme.Text
+hopCountLbl.TextSize = 11
 hopCountLbl.TextXAlignment = Enum.TextXAlignment.Left
-hopCountLbl.Parent = hopR
+hopCountLbl.Parent = StatCard
 
 statusLbl = Instance.new("TextLabel")
-statusLbl.Size = UDim2.new(1, -8, 0, 16)
+statusLbl.Size = UDim2.new(1, -16, 0, 16)
+statusLbl.Position = UDim2.new(0, 8, 0, 22)
 statusLbl.BackgroundTransparency = 1
-statusLbl.Font = FONT_MED
+statusLbl.Font = FONT_REG
 statusLbl.Text = "claims: 0"
 statusLbl.TextColor3 = Theme.TextSub
-statusLbl.TextSize = 11.5
+statusLbl.TextSize = 10.5
 statusLbl.TextXAlignment = Enum.TextXAlignment.Left
-statusLbl.Parent = hopR
+statusLbl.Parent = StatCard
 
 -- TAB 3: Auto Chat (Persis Nasi Rendang)
 local chatL, chatR = makePage("Auto Chat", 3)
@@ -1305,15 +1396,25 @@ section(chatL, "Broadcast Chat Otomatis")
 toggle(chatL, "Auto Send Chat", "autoChat")
 slider(chatL, "Interval Chat (s)", "chatInterval", 5, 300, 5)
 
+local ChatStatusCard = Instance.new("Frame")
+ChatStatusCard.Size = UDim2.new(1, -4, 0, 32)
+ChatStatusCard.BackgroundColor3 = Theme.Card
+ChatStatusCard.BackgroundTransparency = 0.25
+ChatStatusCard.BorderSizePixel = 0
+ChatStatusCard.Parent = chatL
+addCorner(6, ChatStatusCard)
+addStroke(Theme.Border, 1, ChatStatusCard)
+
 chatCountLbl = Instance.new("TextLabel")
-chatCountLbl.Size = UDim2.new(1, -8, 0, 16)
+chatCountLbl.Size = UDim2.new(1, -16, 1, 0)
+chatCountLbl.Position = UDim2.new(0, 8, 0, 0)
 chatCountLbl.BackgroundTransparency = 1
 chatCountLbl.Font = FONT_MED
 chatCountLbl.Text = "chat off"
 chatCountLbl.TextColor3 = Theme.TextSub
-chatCountLbl.TextSize = 11.5
+chatCountLbl.TextSize = 11
 chatCountLbl.TextXAlignment = Enum.TextXAlignment.Left
-chatCountLbl.Parent = chatL
+chatCountLbl.Parent = ChatStatusCard
 
 section(chatR, "Pesan (Rotasi Anti-Spam)")
 textbox(chatR, "Pesan 1", "chatText")
@@ -1363,21 +1464,7 @@ end)
 -- Tab default pertama
 showTab("Farm Telur")
 
--- ==================== OVERLAY COUNTDOWN (TENGAH ATAS) =======================
-local OverlayLbl = Instance.new("TextLabel")
-OverlayLbl.Name = "NextHopOverlay"
-OverlayLbl.AnchorPoint = Vector2.new(0.5, 0)
-OverlayLbl.Position = UDim2.new(0.5, 0, 0, 18)
-OverlayLbl.Size = UDim2.new(0, 360, 0, 24)
-OverlayLbl.BackgroundTransparency = 1
-OverlayLbl.Font = FONT_BOLD
-OverlayLbl.Text = "Next Hop: off"
-OverlayLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-OverlayLbl.TextSize = 13
-OverlayLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-OverlayLbl.TextStrokeTransparency = 0
-OverlayLbl.Parent = ScreenGui
-
+-- Update Overlay Loop
 task.spawn(function()
     while getgenv()[SCRIPT_ID] == RUN_ID do
         task.wait(1)
@@ -1402,4 +1489,4 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     end
 end)
 
-print("[Yancok] Suite lengkap ala Nasi Rendang aktif di TENGAH layar! Tekan [RightShift] untuk sembunyikan/tampilkan.")
+print("[Yancok] UI rapih ala modern dark mode aktif di TENGAH layar! Tekan [RightShift] untuk sembunyikan/tampilkan.")
