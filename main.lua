@@ -390,10 +390,12 @@ local function moveToTarget(targetPos, stopDist)
     local dist = (hrp.Position - targetPos).Magnitude
     if dist <= stopDist then return true end
 
-    local mode = Settings.movementMode or "Safe Walk"
+    local rawMode = tostring(Settings.movementMode or "Safe Walk")
+    local isSmoothGlide = rawMode:find("Smooth Glide") ~= nil
+    local isInstant = rawMode:find("Instant CFrame") ~= nil
 
-    if mode == "Safe Walk" then
-        -- 1. Jarak dekat (< 15 studs): Jalan langsung via MoveTo tanpa overhead pathfinding
+    if not isSmoothGlide and not isInstant then
+        -- 100% Menggunakan Navigasi Fisik Humanoid Roblox Asli (Tidak memicu delta CFrame, bebas BAC-3515 & BAC-4515)
         if dist <= 15 then
             hum:MoveTo(targetPos)
             local t0 = os.clock()
@@ -573,26 +575,69 @@ task.spawn(function()
     end
 end)
 
--- Loop Auto Hatch Telur
+-- Loop Auto Hatch Telur (Aman: Hanya berinteraksi jika berdiri di dekat Egg Stand / Incubator)
 task.spawn(function()
     while getgenv()[SCRIPT_ID] == RUN_ID do
         if Settings.autoHatch then
             pcall(function()
-                local net = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Networking")
-                if net then
-                    for _, r in ipairs(net:GetChildren()) do
-                        if r:IsA("RemoteEvent") then
-                            local rn = string.lower(r.Name)
-                            if string.find(rn, "hatch") or string.find(rn, "openegg") then
-                                r:FireServer(Settings.hatchAmount or 1)
-                                break
+                local hrp = getHrp()
+                if not hrp then return end
+
+                -- Cari Egg Stand / Incubator terdekat dengan ProximityPrompt aktif
+                local myPos = hrp.Position
+                local foundPrompt = nil
+
+                local searchRoots = {
+                    Workspace:FindFirstChild("EggStands"),
+                    Workspace:FindFirstChild("Incubators"),
+                    Workspace:FindFirstChild("HatchArea"),
+                    Workspace:FindFirstChild("Eggs"),
+                }
+                for _, root in ipairs(searchRoots) do
+                    if root then
+                        for _, obj in ipairs(root:GetDescendants()) do
+                            if obj:IsA("ProximityPrompt") and obj.Enabled then
+                                local p = obj.Parent
+                                local part = p and (p:IsA("BasePart") and p or p:FindFirstChildWhichIsA("BasePart", true))
+                                if part and (myPos - part.Position).Magnitude <= 12 then
+                                    local name = string.lower(obj.ActionText .. " " .. obj.ObjectText .. " " .. obj.Name .. " " .. p.Name)
+                                    if string.find(name, "hatch") or string.find(name, "open") or string.find(name, "incub") or string.find(name, "buy") then
+                                        foundPrompt = obj
+                                        break
+                                    end
+                                end
                             end
+                        end
+                    end
+                    if foundPrompt then break end
+                end
+
+                if foundPrompt then
+                    -- Interaksi aman melalui input resmi ProximityPrompt game (Bukan tembak remote liar)
+                    local holdTime = foundPrompt.HoldDuration or 0
+                    if holdTime > 0 then
+                        if type(foundPrompt.InputHoldBegin) == "function" and type(foundPrompt.InputHoldEnd) == "function" then
+                            pcall(function() foundPrompt:InputHoldBegin() end)
+                            task.wait(holdTime + 0.1)
+                            pcall(function() foundPrompt:InputHoldEnd() end)
+                        elseif type(fireproximityprompt) == "function" then
+                            pcall(function() fireproximityprompt(foundPrompt, holdTime) end)
+                        end
+                    else
+                        if type(foundPrompt.InputHoldBegin) == "function" and type(foundPrompt.InputHoldEnd) == "function" then
+                            pcall(function()
+                                foundPrompt:InputHoldBegin()
+                                task.wait(0.06)
+                                foundPrompt:InputHoldEnd()
+                            end)
+                        elseif type(fireproximityprompt) == "function" then
+                            pcall(function() fireproximityprompt(foundPrompt, 0) end)
                         end
                     end
                 end
             end)
         end
-        task.wait(1.8)
+        task.wait(2.2)
     end
 end)
 
@@ -1520,13 +1565,13 @@ end
 local farmL, farmR = makePage("Farm Telur", 1)
 section(farmL, "Auto Steal Telur")
 toggle(farmL, "Auto Steal Telur", "autoSteal")
-dropdown(farmL, "Metode Gerak (Anti-Cheat)", "movementMode", { "Safe Walk", "Smooth Glide", "Instant CFrame" })
+dropdown(farmL, "Metode Gerak (Anti-Cheat)", "movementMode", { "Safe Walk (Rekomendasi 100% Anti-BAC)", "Smooth Glide", "Instant CFrame" })
 toggle(farmL, "Mode Stealth (Anti-Deteksi)", "safeMode")
 slider(farmL, "Jeda Ambil Telur (s)", "stealDelay", 0.1, 1.5, 0.05)
 slider(farmL, "Jarak Maksimal (m)", "maxDistance", 50, 600, 25)
 
 section(farmR, "Auto Hatch & Klaim")
-toggle(farmR, "Auto Hatch Telur", "autoHatch")
+toggle(farmR, "Auto Hatch (Di Dekat Stand)", "autoHatch")
 dropdown(farmR, "Jumlah Sekali Hatch", "hatchAmount", { 1, 3, 8 })
 
 section(farmR, "Statistik Farm")
