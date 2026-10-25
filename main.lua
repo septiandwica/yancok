@@ -44,8 +44,31 @@ local LocalPlayer = Players.LocalPlayer
 local PLACE_ID    = game.PlaceId
 local CURRENT_JOB = game.JobId
 
+-- ======================== CLIENT ANTI-CHEAT NEUTRALIZER ====================
+-- Mencegah client script game menendang (kick) player saat terdeteksi
+pcall(function()
+    if hookmetamethod then
+        local oldNamecall
+        oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+            local method = getnamecallmethod()
+            if tostring(method):lower() == "kick" and self == LocalPlayer then
+                warn("[Yancok Stealth] Deteksi client-side diblokir (Kick dicegah)!")
+                return
+            end
+            return oldNamecall(self, ...)
+        end)
+    end
+    if hookfunction and LocalPlayer.Kick then
+        hookfunction(LocalPlayer.Kick, function(self, ...)
+            warn("[Yancok Stealth] LocalPlayer:Kick() langsung dibatalkan!")
+            return
+        end)
+    end
+end)
+
 -- ============================ CONTAINER PROTEKSI ============================
-local GuiParent = LocalPlayer:WaitForChild("PlayerGui")
+-- Prioritaskan HUI (Hidden UI) atau CoreGui agar luput dari scan PlayerGui
+local GuiParent = nil
 pcall(function()
     if gethui then
         GuiParent = gethui()
@@ -53,8 +76,16 @@ pcall(function()
         GuiParent = game:GetService("CoreGui")
     end
 end)
+if not GuiParent then
+    GuiParent = LocalPlayer:WaitForChild("PlayerGui")
+end
 
--- Bersihkan GUI lama jika ada
+-- Bersihkan instance GUI lama secara bersih tanpa jejak nama
+if getgenv().__YANCOK_GUI then
+    pcall(function() getgenv().__YANCOK_GUI:Destroy() end)
+    getgenv().__YANCOK_GUI = nil
+end
+
 do
     local roots = { GuiParent, LocalPlayer:FindFirstChildOfClass("PlayerGui") }
     pcall(function() roots[#roots + 1] = game:GetService("CoreGui") end)
@@ -63,7 +94,7 @@ do
         if root and not cleaned[root] then
             cleaned[root] = true
             for _, child in ipairs(root:GetChildren()) do
-                if child.Name == "YancokEgg_UI" then
+                if child.Name == "YancokEgg_UI" or child.Name == "YancokEgg_Panel" or child:GetAttribute("YancokPanel") then
                     pcall(function() child:Destroy() end)
                 end
             end
@@ -76,6 +107,7 @@ local Theme = {
     Background = Color3.fromRGB(16, 18, 22),
     Header     = Color3.fromRGB(22, 26, 32),
     Card       = Color3.fromRGB(26, 30, 38),
+    Control    = Color3.fromRGB(36, 42, 54),
     Border     = Color3.fromRGB(42, 48, 60),
     Accent     = Color3.fromRGB(255, 180, 50),     -- Egg Golden Yellow
     AccentDim  = Color3.fromRGB(150, 95, 20),
@@ -94,12 +126,14 @@ local CFG_FOLDER = "Yancok_StealAnEgg"
 local CFG_PATH   = CFG_FOLDER .. "/config.json"
 
 local Settings = {
-    -- 1. Farm Telur
+    -- 1. Farm Telur & Stealth (Anti-Deteksi)
     autoSteal         = true,
-    stealDelay        = 0.15,
+    movementMode      = "Smooth Glide",     -- "Smooth Glide" | "Safe Walk" | "Instant CFrame"
+    safeMode          = true,               -- Anti-Cheat Protection (Jitter + Rate Limiting)
+    stealDelay        = 0.4,                -- Jeda aman (human-like debounce)
+    maxDistance       = 300,                -- Radius aman pencarian telur (m)
     autoHatch         = true,
     hatchAmount       = 1,
-    autoTeleport      = true,
 
     -- 2. Server Hop (Identik Nasi Rendang)
     autoHop           = true,
@@ -126,7 +160,7 @@ local Settings = {
     camFov            = 70,
 
     -- 5. Misc & FPS (Identik Nasi Rendang)
-    fpsBoost          = true,
+    fpsBoost          = false,              -- Default OFF agar tidak memodifikasi integritas map
     autoAcceptFriends = true,
     antiAfk           = true,
 }
@@ -281,6 +315,53 @@ local function findEggTargets()
     return targets
 end
 
+local lastRemoteFireTime = 0
+
+-- Sistem Gerak Alami & Stealth (Mencegah kick deteksi kecepatan / CFrame delta)
+local function moveToTarget(targetPos)
+    local chr = LocalPlayer.Character
+    if not chr then return false end
+    local hrp = chr:FindFirstChild("HumanoidRootPart")
+    local hum = chr:FindFirstChildOfClass("Humanoid")
+    if not (hrp and hum) then return false end
+
+    local dist = (hrp.Position - targetPos).Magnitude
+    if dist <= 5 then return true end
+
+    local mode = Settings.movementMode or "Smooth Glide"
+
+    if mode == "Safe Walk" then
+        -- 100% Menggunakan Navigasi Fisik Humanoid Roblox Asli (Tidak memicu delta CFrame)
+        hum:MoveTo(targetPos)
+        local t0 = os.clock()
+        local ws = (hum.WalkSpeed and hum.WalkSpeed > 0) and hum.WalkSpeed or 16
+        local maxWait = math.clamp(dist / ws, 0.8, 6.0)
+        while (os.clock() - t0) < maxWait do
+            if not chr or not hrp or (hrp.Position - targetPos).Magnitude <= 5 then
+                return true
+            end
+            task.wait(0.1)
+        end
+        return (hrp.Position - targetPos).Magnitude <= 10
+
+    elseif mode == "Smooth Glide" then
+        -- Interpolasi Halus & Kontinu (Kecepatan 38 studs/detik, mirip lari alami)
+        local speed = 38
+        local duration = math.clamp(dist / speed, 0.15, 3.0)
+        local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+        local tween = TweenService:Create(hrp, tweenInfo, { CFrame = CFrame.new(targetPos + Vector3.new(0, 1.8, 0)) })
+        tween:Play()
+        task.wait(duration)
+        return true
+
+    else
+        -- Instant CFrame (Direct Snap - gunakan jika di private server / ingin tercepat)
+        hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 2.2, 0))
+        task.wait(0.04)
+        return true
+    end
+end
+
 local function stealEgg(eggObj)
     if not (eggObj and eggObj.Parent) then return false end
     local hrp = getHrp()
@@ -289,13 +370,19 @@ local function stealEgg(eggObj)
     local targetPart = eggObj:IsA("BasePart") and eggObj or eggObj:FindFirstChildWhichIsA("BasePart", true)
     if not targetPart then return false end
 
+    -- Batasi jarak maksimal agar tidak mencurigakan lari melintasi void
+    local dist = (hrp.Position - targetPart.Position).Magnitude
+    if Settings.maxDistance and dist > (Settings.maxDistance or 300) then
+        return false
+    end
+
+    -- Gerak ke target dengan metode stealth yang dipilih
+    local arrived = moveToTarget(targetPart.Position)
+    if not arrived then return false end
+
     local success = false
     pcall(function()
-        -- Teleport karakter langsung ke posisi telur
-        hrp.CFrame = targetPart.CFrame + Vector3.new(0, 2.5, 0)
-        task.wait(0.06)
-
-        -- 1. Trigger ProximityPrompt (E)
+        -- 1. Trigger ProximityPrompt (E) interaksi resmi game
         local prompt = eggObj:FindFirstChildWhichIsA("ProximityPrompt", true)
         if prompt then
             if type(fireproximityprompt) == "function" then
@@ -305,7 +392,7 @@ local function stealEgg(eggObj)
             end
         end
 
-        -- 2. Trigger TouchInterest fisik
+        -- 2. Trigger TouchInterest fisik resmi
         if targetPart:FindFirstChild("TouchInterest") or eggObj:FindFirstChildWhichIsA("TouchTransmitter", true) then
             if type(firetouchinterest) == "function" then
                 firetouchinterest(hrp, targetPart, 0)
@@ -315,17 +402,20 @@ local function stealEgg(eggObj)
             end
         end
 
-        -- 3. Trigger RemoteEvent jika ada di Packages.Networking / ReplicatedStorage
-        local net = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Networking")
-        if net then
-            for _, r in ipairs(net:GetChildren()) do
-                if r:IsA("RemoteEvent") then
-                    local rn = string.lower(r.Name)
-                    if string.find(rn, "redeem") or string.find(rn, "claim") or string.find(rn, "fieldegg") or string.find(rn, "steal") then
-                        r:FireServer(eggObj)
-                        r:FireServer(targetPart)
-                        r:FireServer(eggObj.Name)
-                        success = true
+        -- 3. Rate-Limited RemoteEvent (Cegah Remote Flood / Spamming Kick)
+        local now = os.clock()
+        if (now - lastRemoteFireTime) >= 0.3 then
+            lastRemoteFireTime = now
+            local net = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Networking")
+            if net then
+                for _, r in ipairs(net:GetChildren()) do
+                    if r:IsA("RemoteEvent") then
+                        local rn = string.lower(r.Name)
+                        if string.find(rn, "redeem") or string.find(rn, "claim") or string.find(rn, "fieldegg") or string.find(rn, "steal") then
+                            r:FireServer(eggObj)
+                            success = true
+                            break -- Hanya tembak remote pertama yang cocok, jangan spam
+                        end
                     end
                 end
             end
@@ -334,7 +424,7 @@ local function stealEgg(eggObj)
     return success
 end
 
--- Loop Auto Steal Telur
+-- Loop Auto Steal Telur dengan Humanized Jitter
 task.spawn(function()
     while getgenv()[SCRIPT_ID] == RUN_ID do
         if Settings.autoSteal then
@@ -343,11 +433,16 @@ task.spawn(function()
                 if not Settings.autoSteal or getgenv()[SCRIPT_ID] ~= RUN_ID then break end
                 if egg and egg.Parent then
                     stealEgg(egg)
-                    task.wait(Settings.stealDelay or 0.18)
+                    -- Tambahkan variasi jeda acak manusiawi (Jitter) jika Safe Mode aktif
+                    local delayVal = Settings.stealDelay or 0.4
+                    if Settings.safeMode then
+                        delayVal = delayVal + (math.random(3, 18) / 100)
+                    end
+                    task.wait(delayVal)
                 end
             end
         end
-        task.wait(0.5)
+        task.wait(0.6)
     end
 end)
 
@@ -362,18 +457,20 @@ task.spawn(function()
                         if r:IsA("RemoteEvent") then
                             local rn = string.lower(r.Name)
                             if string.find(rn, "hatch") or string.find(rn, "openegg") then
-                                r:FireServer(1)
+                                r:FireServer(Settings.hatchAmount or 1)
+                                break
                             end
                         end
                     end
                 end
             end)
         end
-        task.wait(1.5)
+        task.wait(1.8)
     end
 end)
 
 -- ============================ FPS BOOSTER ENGINE ===========================
+-- Dibuat non-destruktif agar tidak merusak integritas Workspace (Aman dari Map Integrity Check)
 local boostWatcher = nil
 local function stripObject(v)
     pcall(function()
@@ -381,13 +478,8 @@ local function stripObject(v)
             v.Material = Enum.Material.Plastic
             v.Reflectance = 0
             v.CastShadow = false
-            if v:IsA("MeshPart") then v.TextureID = "" end
         elseif v:IsA("Decal") or v:IsA("Texture") then
             v.Transparency = 1
-        elseif v:IsA("SurfaceAppearance") then
-            v:Destroy()
-        elseif v:IsA("SpecialMesh") then
-            v.TextureId = ""
         elseif v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam") or v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles") then
             v.Enabled = false
         elseif v:IsA("PostEffect") then
@@ -730,9 +822,18 @@ end)
 -- ================================= GUI PANEL ================================
 -- Layout Horizontal 2-Kolom Berbasis Tab (Super Rapih, Modern, Posisi Tengah Layar)
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "YancokEgg_Panel"
+local randomTag = string.sub(HttpService:GenerateGUID(false):gsub("-", ""), 1, 8)
+ScreenGui.Name = "RobloxGui_" .. randomTag
+ScreenGui:SetAttribute("YancokPanel", true)
 ScreenGui.ResetOnSpawn = false
+
+pcall(function()
+    if syn and syn.protect_gui then
+        syn.protect_gui(ScreenGui)
+    end
+end)
 ScreenGui.Parent = GuiParent
+getgenv().__YANCOK_GUI = ScreenGui
 
 local function addCorner(r, p)
     local c = Instance.new("UICorner")
@@ -752,7 +853,7 @@ end
 
 -- =========================== TOP CENTER OVERLAY HUD =========================
 local OverlayHud = Instance.new("Frame")
-OverlayHud.Name = "NextHopOverlay"
+OverlayHud.Name = "StatusOverlay"
 OverlayHud.AnchorPoint = Vector2.new(0.5, 0)
 OverlayHud.Position = UDim2.new(0.5, 0, 0, 14)
 OverlayHud.Size = UDim2.new(0, 300, 0, 28)
@@ -774,7 +875,7 @@ OverlayLbl.Parent = OverlayHud
 
 -- =========================== FLOATING MINI BADGE ============================
 local MiniBar = Instance.new("Frame")
-MiniBar.Name = "MiniBar"
+MiniBar.Name = "StatusBar"
 MiniBar.AnchorPoint = Vector2.new(0.5, 1)
 MiniBar.Position = UDim2.new(0.5, 0, 1, -14)
 MiniBar.Size = UDim2.new(0, 190, 0, 30)
@@ -1288,12 +1389,14 @@ local function button(parent, label, onClick)
 end
 
 -- ===================== SUSUNAN HALAMAN MENU (5 TAB LENGKAP) =================
--- TAB 1: Farm Telur
+-- TAB 1: Farm Telur & Stealth
 local farmL, farmR = makePage("Farm Telur", 1)
 section(farmL, "Auto Steal Telur")
 toggle(farmL, "Auto Steal Telur", "autoSteal")
-slider(farmL, "Jeda Ambil Telur (s)", "stealDelay", 0.05, 1.0, 0.05)
-toggle(farmL, "Teleport ke Posisi Telur", "autoTeleport")
+dropdown(farmL, "Metode Gerak (Anti-Cheat)", "movementMode", { "Smooth Glide", "Safe Walk", "Instant CFrame" })
+toggle(farmL, "Mode Stealth (Anti-Deteksi)", "safeMode")
+slider(farmL, "Jeda Ambil Telur (s)", "stealDelay", 0.1, 1.5, 0.05)
+slider(farmL, "Jarak Maksimal (m)", "maxDistance", 50, 600, 25)
 
 section(farmR, "Auto Hatch & Klaim")
 toggle(farmR, "Auto Hatch Telur", "autoHatch")
@@ -1478,15 +1581,17 @@ task.spawn(function()
     end
 end)
 
--- Toggle Shortcut Keyboard (RightShift)
+-- Toggle Shortcut Keyboard (RightShift) — Full Stealth Mode
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.KeyCode == Enum.KeyCode.RightShift and ScreenGui.Parent then
-        Window.Visible = not Window.Visible
-        if not Window.Visible then
+        local newState = not Window.Visible
+        Window.Visible = newState
+        OverlayHud.Visible = newState
+        if not newState then
             MiniBar.Visible = false
         end
     end
 end)
 
-print("[Yancok] UI rapih ala modern dark mode aktif di TENGAH layar! Tekan [RightShift] untuk sembunyikan/tampilkan.")
+print("[Yancok Stealth] Script aktif dengan proteksi Anti-Cheat! Tekan [RightShift] untuk sembunyikan/tampilkan seluruh UI.")

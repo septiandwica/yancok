@@ -46,7 +46,7 @@ task.spawn(function()
             if root and not seen[root] then
                 seen[root] = true
                 for _, g in ipairs(root:GetChildren()) do
-                    if g:IsA("ScreenGui") and tostring(g.Name):find("_Panel") then
+                    if g:IsA("ScreenGui") and (tostring(g.Name):find("_Panel") or g:GetAttribute("YancokPanel") or (g:FindFirstChild("TopBar") and g:FindFirstChild("Window"))) then
                         local win = g:FindFirstChild("Window")
                         if win and win:IsA("GuiObject") and not snapped[win] then
                             snapped[win] = true
@@ -77,4 +77,4 @@ end)
 ]]):format(LOADER_URL))
 end
 
-print("[PanelPos] keeper aktif - semua panel diparkir pojok kanan bawah wwww")
+print("[PanelPos] keeper aktif - semua panel diposisikan rapi di tengah layar")
