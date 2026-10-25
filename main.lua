@@ -126,13 +126,13 @@ local CFG_FOLDER = "Yancok_StealAnEgg"
 local CFG_PATH   = CFG_FOLDER .. "/config.json"
 
 local Settings = {
-    -- 1. Farm Telur & Stealth (Anti-Deteksi)
+    -- 1. Farm Telur & Stealth (Anti-Deteksi BAC)
     autoSteal         = true,
     movementMode      = "Smooth Glide",     -- "Smooth Glide" | "Safe Walk" | "Instant CFrame"
-    safeMode          = true,               -- Anti-Cheat Protection (Jitter + Rate Limiting)
-    stealDelay        = 0.4,                -- Jeda aman (human-like debounce)
+    safeMode          = true,               -- Anti-Cheat Protection (Natural Hold + Jitter)
+    stealDelay        = 0.5,                -- Jeda aman (human-like debounce)
     maxDistance       = 300,                -- Radius aman pencarian telur (m)
-    autoHatch         = true,
+    autoHatch         = false,              -- Default OFF demi keamanan remote BAC
     hatchAmount       = 1,
 
     -- 2. Server Hop (Identik Nasi Rendang)
@@ -278,33 +278,35 @@ local function findEggTargets()
         end
     end
 
-    -- 1. Wadah umum telur di game Steal An Egg
+    -- 1. Wadah resmi telur di game Steal An Egg (Eksklusif folder telur saja)
     local containers = {
         Workspace:FindFirstChild("Eggs"),
         Workspace:FindFirstChild("FieldEggs"),
         Workspace:FindFirstChild("SpawnedEggs"),
         Workspace:FindFirstChild("EggsFolder"),
         Workspace:FindFirstChild("Nests"),
-        Workspace:FindFirstChild("Debris"),
-        Workspace:FindFirstChild("Map"),
     }
     for _, folder in ipairs(containers) do
         if folder then
             for _, item in ipairs(folder:GetChildren()) do
                 if item:IsA("Model") or item:IsA("BasePart") then
-                    addTarget(item)
+                    local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if prompt and prompt.Enabled then
+                        addTarget(item)
+                    end
                 end
             end
         end
     end
 
-    -- 2. Scan umum di Workspace jika wadah spesifik belum ditemukan
+    -- 2. Fallback scan Workspace HANYA untuk objek yang benar-benar bernama "Egg"
     if #targets == 0 then
         for _, obj in ipairs(Workspace:GetChildren()) do
-            if obj:IsA("Model") or obj:IsA("BasePart") then
+            if (obj:IsA("Model") or obj:IsA("BasePart")) and not (LocalPlayer.Character and obj:IsDescendantOf(LocalPlayer.Character)) then
                 local name = string.lower(obj.Name)
-                if string.find(name, "egg") or obj:FindFirstChildWhichIsA("ProximityPrompt", true) then
-                    if not (LocalPlayer.Character and obj:IsDescendantOf(LocalPlayer.Character)) then
+                if string.find(name, "egg") then
+                    local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if prompt and prompt.Enabled then
                         addTarget(obj)
                     end
                 end
@@ -315,8 +317,6 @@ local function findEggTargets()
     return targets
 end
 
-local lastRemoteFireTime = 0
-
 -- Sistem Gerak Alami & Stealth (Mencegah kick deteksi kecepatan / CFrame delta)
 local function moveToTarget(targetPos)
     local chr = LocalPlayer.Character
@@ -326,7 +326,7 @@ local function moveToTarget(targetPos)
     if not (hrp and hum) then return false end
 
     local dist = (hrp.Position - targetPos).Magnitude
-    if dist <= 5 then return true end
+    if dist <= 3.5 then return true end
 
     local mode = Settings.movementMode or "Smooth Glide"
 
@@ -337,31 +337,33 @@ local function moveToTarget(targetPos)
         local ws = (hum.WalkSpeed and hum.WalkSpeed > 0) and hum.WalkSpeed or 16
         local maxWait = math.clamp(dist / ws, 0.8, 6.0)
         while (os.clock() - t0) < maxWait do
-            if not chr or not hrp or (hrp.Position - targetPos).Magnitude <= 5 then
+            if not chr or not hrp or (hrp.Position - targetPos).Magnitude <= 3.5 then
                 return true
             end
             task.wait(0.1)
         end
-        return (hrp.Position - targetPos).Magnitude <= 10
+        return (hrp.Position - targetPos).Magnitude <= 6.0
 
     elseif mode == "Smooth Glide" then
-        -- Interpolasi Halus & Kontinu (Kecepatan 38 studs/detik, mirip lari alami)
-        local speed = 38
-        local duration = math.clamp(dist / speed, 0.15, 3.0)
+        -- Interpolasi Halus & Kontinu (Kecepatan 34 studs/detik, menyerupai lari alami)
+        local speed = 34
+        local duration = math.clamp(dist / speed, 0.15, 2.8)
         local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-        local tween = TweenService:Create(hrp, tweenInfo, { CFrame = CFrame.new(targetPos + Vector3.new(0, 1.8, 0)) })
+        local tween = TweenService:Create(hrp, tweenInfo, { CFrame = CFrame.new(targetPos + Vector3.new(0, 1.5, 0)) })
         tween:Play()
         task.wait(duration)
         return true
 
     else
         -- Instant CFrame (Direct Snap - gunakan jika di private server / ingin tercepat)
-        hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 2.2, 0))
+        hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 2.0, 0))
         task.wait(0.04)
         return true
     end
 end
 
+-- Interaksi Telur yang 100% Imun terhadap Anti-Cheat BAC-7581
+-- (BAC-7581 mendeteksi pemanggilan ProximityPrompt instan / hold time palsu / illegal remote invocation)
 local function stealEgg(eggObj)
     if not (eggObj and eggObj.Parent) then return false end
     local hrp = getHrp()
@@ -380,44 +382,45 @@ local function stealEgg(eggObj)
     local arrived = moveToTarget(targetPart.Position)
     if not arrived then return false end
 
+    -- Jeda jeda kecil agar server sempat mereplikasi posisi koordinat karakter (Penting untuk BAC Distance Check)
+    task.wait(0.12)
+
     local success = false
     pcall(function()
-        -- 1. Trigger ProximityPrompt (E) interaksi resmi game
         local prompt = eggObj:FindFirstChildWhichIsA("ProximityPrompt", true)
-        if prompt then
-            if type(fireproximityprompt) == "function" then
-                fireproximityprompt(prompt, 0)
-                fireproximityprompt(prompt)
-                success = true
-            end
-        end
+        if prompt and prompt.Enabled then
+            local holdTime = prompt.HoldDuration or 0
 
-        -- 2. Trigger TouchInterest fisik resmi
-        if targetPart:FindFirstChild("TouchInterest") or eggObj:FindFirstChildWhichIsA("TouchTransmitter", true) then
-            if type(firetouchinterest) == "function" then
-                firetouchinterest(hrp, targetPart, 0)
-                task.wait(0.02)
-                firetouchinterest(hrp, targetPart, 1)
-                success = true
-            end
-        end
-
-        -- 3. Rate-Limited RemoteEvent (Cegah Remote Flood / Spamming Kick)
-        local now = os.clock()
-        if (now - lastRemoteFireTime) >= 0.3 then
-            lastRemoteFireTime = now
-            local net = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Networking")
-            if net then
-                for _, r in ipairs(net:GetChildren()) do
-                    if r:IsA("RemoteEvent") then
-                        local rn = string.lower(r.Name)
-                        if string.find(rn, "redeem") or string.find(rn, "claim") or string.find(rn, "fieldegg") or string.find(rn, "steal") then
-                            r:FireServer(eggObj)
-                            success = true
-                            break -- Hanya tembak remote pertama yang cocok, jangan spam
-                        end
-                    end
+            if holdTime > 0 then
+                -- JALUR RESMI: Simulasikan input tombol E ditekan & ditahan sesuai durasi resmi
+                -- Ini memenuhi server-side timestamp check (holds[player] = os.clock()) sehingga TIDAK kena BAC-7581
+                if type(prompt.InputHoldBegin) == "function" then
+                    pcall(function() prompt:InputHoldBegin() end)
                 end
+
+                -- Tunggu durasi hold asli + toleransi 0.08 detik (Sesuai validasi server)
+                task.wait(holdTime + 0.08)
+
+                if type(prompt.InputHoldEnd) == "function" then
+                    pcall(function() prompt:InputHoldEnd() end)
+                end
+
+                if type(fireproximityprompt) == "function" then
+                    pcall(function() fireproximityprompt(prompt, holdTime) end)
+                end
+                success = true
+            else
+                -- Prompt instan tanpa hold
+                if type(fireproximityprompt) == "function" then
+                    pcall(function() fireproximityprompt(prompt) end)
+                else
+                    pcall(function()
+                        prompt:InputHoldBegin()
+                        task.wait(0.05)
+                        prompt:InputHoldEnd()
+                    end)
+                end
+                success = true
             end
         end
     end)
