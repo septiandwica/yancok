@@ -22,8 +22,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/septiandwica/yancok/r
 
 ## 📁 Struktur File di Repo `yancok`
 
-* **`main.lua`**: Script utama Steal An Egg (UI kontrol, Server Hop, FPS Boost, Auto Chat, Camera Lock).
-* **`holy.lua`**: Core automation payload (engine pencuri telur).
+* **`main.lua`**: Script utama Steal An Egg (Native Auto Steal & Hatch, UI kontrol, Server Hop, FPS Boost, Auto Chat, Camera Lock).
 * **`fps.lua`**: Modul standalone Extreme FPS Booster.
 * **`hop.lua`**: Modul standalone Server Hopper & Chat.
 * **`panelpos.lua`**: Modul penjaga posisi GUI di pojok kanan bawah.

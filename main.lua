@@ -27,7 +27,6 @@ local GITHUB_BRANCH = "main"
 
 local BASE_URL = string.format("https://raw.githubusercontent.com/%s/%s/refs/heads/%s", GITHUB_USER, GITHUB_REPO, GITHUB_BRANCH)
 local MAIN_URL = BASE_URL .. "/main.lua"
-local CORE_EGG_URL = BASE_URL .. "/holy.lua"
 
 -- ============================== ROBLOX SERVICES ============================
 local Players            = game:GetService("Players")
@@ -95,6 +94,10 @@ local CFG_FOLDER = "Yancok_StealAnEgg"
 local CFG_PATH   = CFG_FOLDER .. "/config.json"
 
 local Settings = {
+    autoSteal       = true,               -- Auto farm & ambil telur di map
+    stealDelay      = 0.18,               -- Kecepatan delay antar klaim telur (detik)
+    autoHatch       = true,               -- Auto tetaskan telur
+
     autoHop         = true,
     hopMode         = "Any",              -- "Interval" | "After Steals" | "No Match" | "Any"
     hopInterval     = 12,                 -- menit
@@ -151,17 +154,37 @@ local function registerClaim()
     lastClaimTime = os.clock()
 end
 
--- Deteksi remote event klaim telur (Patch 2026)
+-- Deteksi remote event klaim telur (Tahan update game)
 do
-    pcall(function()
-        local net = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Networking")
-        local ev = net and net:FindFirstChild("RE/EggWorld/FieldEggRedeemVerdict")
+    local function hookRemote(ev)
         if ev and ev:IsA("RemoteEvent") then
             ev.OnClientEvent:Connect(function(res)
                 if res == nil or res == true or (type(res) == "table" and res.Ok ~= false) then
                     registerClaim()
                 end
             end)
+        end
+    end
+
+    pcall(function()
+        local net = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Networking")
+        if net then
+            for _, c in ipairs(net:GetChildren()) do
+                local n = string.lower(c.Name)
+                if string.find(n, "egg") or string.find(n, "redeem") or string.find(n, "verdict") or string.find(n, "claim") then
+                    hookRemote(c)
+                end
+            end
+        end
+    end)
+
+    -- Fallback scan seluruh ReplicatedStorage
+    pcall(function()
+        for _, c in ipairs(ReplicatedStorage:GetDescendants()) do
+            local n = string.lower(c.Name)
+            if c:IsA("RemoteEvent") and (string.find(n, "fieldeggredeem") or string.find(n, "eggclaim") or string.find(n, "eggworld")) then
+                hookRemote(c)
+            end
         end
     end)
 
@@ -194,27 +217,151 @@ do
     end)
 end
 
--- ========================== JALANKAN CORE AUTOMATION =======================
--- Memuat engine pencuri telur (holy.lua) secara keyless
-task.spawn(function()
-    pcall(function()
-        getgenv().SCRIPT_KEY = "KEYLESS"
-        local ok, payload = pcall(game.HttpGet, game, CORE_EGG_URL)
-        if not (ok and type(payload) == "string" and #payload > 0) then
-            ok, payload = pcall(game.HttpGet, game, BASE_URL .. "/yancok/holy.lua")
+-- ==================== NATIVE STEAL & EGG ENGINE (100% CLEAN) ===================
+-- 100% Native Luau: Tanpa holy.lua, tanpa key, dan bebas dari dependensi nrlscript
+local function getHrp()
+    local chr = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    return chr and chr:FindFirstChild("HumanoidRootPart")
+end
+
+local function findEggTargets()
+    local targets = {}
+    local seen = {}
+
+    local function addTarget(obj)
+        if obj and not seen[obj] then
+            seen[obj] = true
+            targets[#targets + 1] = obj
         end
-        if ok and type(payload) == "string" and #payload > 0 then
-            pcall(function() loadstring(payload)() end)
-            print("[Yancok] Core egg engine loaded successfully.")
-        else
-            -- Fallback jika file lokal tersedia di executor
-            if type(readfile) == "function" and isfile and isfile("yancok/holy.lua") then
-                pcall(function() loadstring(readfile("yancok/holy.lua"))() end)
-            elseif type(readfile) == "function" and isfile and isfile("holy.lua") then
-                pcall(function() loadstring(readfile("holy.lua"))() end)
+    end
+
+    -- 1. Wadah umum telur di game Steal An Egg
+    local containers = {
+        Workspace:FindFirstChild("Eggs"),
+        Workspace:FindFirstChild("FieldEggs"),
+        Workspace:FindFirstChild("SpawnedEggs"),
+        Workspace:FindFirstChild("EggsFolder"),
+        Workspace:FindFirstChild("Nests"),
+        Workspace:FindFirstChild("Debris"),
+        Workspace:FindFirstChild("Map"),
+    }
+    for _, folder in ipairs(containers) do
+        if folder then
+            for _, item in ipairs(folder:GetChildren()) do
+                if item:IsA("Model") or item:IsA("BasePart") then
+                    addTarget(item)
+                end
+            end
+        end
+    end
+
+    -- 2. Scan umum di Workspace jika wadah spesifik belum ditemukan
+    if #targets == 0 then
+        for _, obj in ipairs(Workspace:GetChildren()) do
+            if obj:IsA("Model") or obj:IsA("BasePart") then
+                local name = string.lower(obj.Name)
+                if string.find(name, "egg") or obj:FindFirstChildWhichIsA("ProximityPrompt", true) then
+                    if not (LocalPlayer.Character and obj:IsDescendantOf(LocalPlayer.Character)) then
+                        addTarget(obj)
+                    end
+                end
+            end
+        end
+    end
+
+    return targets
+end
+
+local function stealEgg(eggObj)
+    if not (eggObj and eggObj.Parent) then return false end
+    local hrp = getHrp()
+    if not hrp then return false end
+
+    local targetPart = eggObj:IsA("BasePart") and eggObj or eggObj:FindFirstChildWhichIsA("BasePart", true)
+    if not targetPart then return false end
+
+    local success = false
+    pcall(function()
+        -- Teleport karakter langsung ke posisi telur
+        hrp.CFrame = targetPart.CFrame + Vector3.new(0, 2.5, 0)
+        task.wait(0.06)
+
+        -- 1. Trigger ProximityPrompt (E)
+        local prompt = eggObj:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if prompt then
+            if type(fireproximityprompt) == "function" then
+                fireproximityprompt(prompt, 0)
+                fireproximityprompt(prompt)
+                success = true
+            end
+        end
+
+        -- 2. Trigger TouchInterest fisik
+        if targetPart:FindFirstChild("TouchInterest") or eggObj:FindFirstChildWhichIsA("TouchTransmitter", true) then
+            if type(firetouchinterest) == "function" then
+                firetouchinterest(hrp, targetPart, 0)
+                task.wait(0.02)
+                firetouchinterest(hrp, targetPart, 1)
+                success = true
+            end
+        end
+
+        -- 3. Trigger RemoteEvent jika ada di Packages.Networking / ReplicatedStorage
+        local net = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Networking")
+        if net then
+            for _, r in ipairs(net:GetChildren()) do
+                if r:IsA("RemoteEvent") then
+                    local rn = string.lower(r.Name)
+                    if string.find(rn, "redeem") or string.find(rn, "claim") or string.find(rn, "fieldegg") or string.find(rn, "steal") then
+                        r:FireServer(eggObj)
+                        r:FireServer(targetPart)
+                        r:FireServer(eggObj.Name)
+                        success = true
+                    end
+                end
             end
         end
     end)
+    return success
+end
+
+-- Loop Auto Steal Telur
+task.spawn(function()
+    while getgenv()[SCRIPT_ID] == RUN_ID do
+        if Settings.autoSteal then
+            local eggs = findEggTargets()
+            for _, egg in ipairs(eggs) do
+                if not Settings.autoSteal or getgenv()[SCRIPT_ID] ~= RUN_ID then break end
+                if egg and egg.Parent then
+                    stealEgg(egg)
+                    task.wait(Settings.stealDelay or 0.18)
+                end
+            end
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- Loop Auto Hatch Telur
+task.spawn(function()
+    while getgenv()[SCRIPT_ID] == RUN_ID do
+        if Settings.autoHatch then
+            pcall(function()
+                local net = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Networking")
+                if net then
+                    for _, r in ipairs(net:GetChildren()) do
+                        if r:IsA("RemoteEvent") then
+                            local rn = string.lower(r.Name)
+                            if string.find(rn, "hatch") or string.find(rn, "openegg") then
+                                r:FireServer(1)
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+        task.wait(1.5)
+    end
 end)
 
 -- ============================ FPS BOOSTER ENGINE ===========================
@@ -278,6 +425,36 @@ end
 
 -- ============================ SERVER HOP ENGINE ============================
 local hopping = false
+
+local function fetchServerList()
+    local endpoints = {
+        ("https://games.roproxy.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(PLACE_ID),
+        ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(PLACE_ID),
+        ("https://games.roproxy.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=100"):format(PLACE_ID),
+    }
+    for _, url in ipairs(endpoints) do
+        local body = nil
+        pcall(function()
+            local fn = request or http_request or (http and http.request)
+            if fn then
+                local res = fn({ Url = url, Method = "GET" })
+                if res and res.Body and #res.Body > 0 then body = res.Body end
+            end
+        end)
+        if not body then
+            pcall(function() body = game:HttpGet(url) end)
+        end
+        if body and #body > 0 then
+            local ok, data = pcall(function() return HttpService:JSONDecode(body) end)
+            if ok and type(data) == "table" and type(data.data) == "table" and #data.data > 0 then
+                return data.data
+            end
+        end
+        task.wait(0.2)
+    end
+    return nil
+end
+
 local function doServerHop()
     if hopping then return false end
     hopping = true
@@ -293,45 +470,70 @@ local function doServerHop()
         ]], MAIN_URL))
     end
 
-    local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(PLACE_ID)
-    local body
-    pcall(function()
-        local req = request or http_request or (http and http.request)
-        if req then body = req({ Url = url, Method = "GET" }).Body end
-    end)
-    if not body then pcall(function() body = game:HttpGet(url) end) end
+    local serverList = fetchServerList()
+    local targetServerId = nil
 
-    local data
-    pcall(function() data = HttpService:JSONDecode(body) end)
-    if not (data and type(data.data) == "table") then
-        hopping = false
-        return false
-    end
+    if serverList and #serverList > 0 then
+        local candidates = {}
+        -- Filter tahap 1: Sesuai filter pemain yang ditentukan
+        for _, s in ipairs(serverList) do
+            if s.id and s.id ~= CURRENT_JOB and type(s.playing) == "number" and s.playing < (s.maxPlayers or 999) then
+                if s.playing >= (Settings.hopMinPlayers or 1) and (Settings.hopMaxPlayers <= 0 or s.playing <= Settings.hopMaxPlayers) then
+                    candidates[#candidates + 1] = s
+                end
+            end
+        end
 
-    local valid = {}
-    for _, s in ipairs(data.data) do
-        if s.id and s.id ~= CURRENT_JOB and type(s.playing) == "number" and s.playing < (s.maxPlayers or 999) then
-            if s.playing >= (Settings.hopMinPlayers or 2) and (Settings.hopMaxPlayers <= 0 or s.playing <= Settings.hopMaxPlayers) then
-                valid[#valid + 1] = s
+        -- Filter tahap 2 (Relaxation): Jika filter terlalu sempit, ambil server mana pun yang ada slot
+        if #candidates == 0 then
+            for _, s in ipairs(serverList) do
+                if s.id and s.id ~= CURRENT_JOB and type(s.playing) == "number" and s.playing < (s.maxPlayers or 999) then
+                    candidates[#candidates + 1] = s
+                end
+            end
+        end
+
+        if #candidates > 0 then
+            if Settings.hopPreferEmpty then
+                table.sort(candidates, function(a, b) return a.playing < b.playing end)
+                local minPlayers = candidates[1].playing
+                local tier = {}
+                for _, s in ipairs(candidates) do
+                    if s.playing <= minPlayers + 2 then tier[#tier + 1] = s end
+                end
+                targetServerId = tier[math.random(#tier)].id
+            else
+                targetServerId = candidates[math.random(#candidates)].id
             end
         end
     end
 
-    if #valid == 0 then
-        hopping = false
-        return false
-    end
-
-    if Settings.hopPreferEmpty then
-        table.sort(valid, function(a, b) return a.playing < b.playing end)
-    end
-
-    -- Timeout safety guard
-    task.delay(20, function()
-        if hopping then hopping = false end
+    -- Listener jika instance teleportasi gagal
+    local failConn = nil
+    failConn = TeleportService.TeleportInitFailed:Connect(function(plr, result, msg)
+        if plr == LocalPlayer then
+            print("[Yancok AutoHop] Gagal ke instance spesifik, mencoba matchmaking acak...")
+            if failConn then pcall(function() failConn:Disconnect() end) end
+            task.wait(1)
+            pcall(function() TeleportService:Teleport(PLACE_ID, LocalPlayer) end)
+        end
     end)
 
-    TeleportService:TeleportToPlaceInstance(PLACE_ID, valid[1].id, LocalPlayer)
+    -- Safety timeout (15 detik)
+    task.delay(15, function()
+        if hopping then
+            hopping = false
+            if failConn then pcall(function() failConn:Disconnect() end) end
+        end
+    end)
+
+    if targetServerId then
+        print("[Yancok AutoHop] Berpindah ke server: " .. tostring(targetServerId))
+        pcall(function() TeleportService:TeleportToPlaceInstance(PLACE_ID, targetServerId, LocalPlayer) end)
+    else
+        print("[Yancok AutoHop] Menggunakan native Teleport matchmaking...")
+        pcall(function() TeleportService:Teleport(PLACE_ID, LocalPlayer) end)
+    end
     return true
 end
 
@@ -340,7 +542,7 @@ task.spawn(function()
     local startTime = os.clock()
     hopBaseClaims = totalClaims
     while getgenv()[SCRIPT_ID] == RUN_ID do
-        task.wait(4)
+        task.wait(3)
         if Settings.autoHop and not hopping then
             local elapsedSec = os.clock() - startTime
             local claimsGained = totalClaims - hopBaseClaims
@@ -356,7 +558,7 @@ task.spawn(function()
             else -- Any
                 ready = (elapsedSec >= Settings.hopInterval * 60)
                      or (claimsGained >= Settings.hopSteals)
-                     or (noMatchSec >= Settings.hopNoMatchDelay and claimsGained > 0)
+                     or (noMatchSec >= Settings.hopNoMatchDelay)
             end
 
             if ready then
@@ -632,6 +834,14 @@ local function createToggle(title, desc, initialVal, onToggle)
 end
 
 -- Toggles
+createToggle("Auto Steal / Farm Telur", "Ambil & klaim semua telur di map otomatis", Settings.autoSteal, function(val)
+    Settings.autoSteal = val
+end)
+
+createToggle("Auto Hatch Telur", "Tetaskan telur otomatis untuk pet baru", Settings.autoHatch, function(val)
+    Settings.autoHatch = val
+end)
+
 createToggle("Auto Server Hop", "Pindah server saat target tercapai / sepi", Settings.autoHop, function(val)
     Settings.autoHop = val
 end)
