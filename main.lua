@@ -88,6 +88,8 @@ local CFG_PATH   = CFG_FOLDER .. "/config.json"
 local Settings = {
     -- 1. Farm Telur & Stealth
     autoSteal         = true,               -- ON (Langsung otomatis jalan)
+    rarityTarget      = "Semua (Prioritas)",-- "Semua (Prioritas)" | "👑 Divine" | "⚡ Eternal" | "🔮 Secret" | ...
+    onlyTargetRarity  = false,              -- Jika true, hanya ambil rarity terpilih
     movementMode      = "Safe Walk",        -- "Safe Walk" | "Smooth Glide" | "Instant CFrame"
     safeMode          = true,               -- Anti-Cheat Protection
     stealDelay        = 0.4,                -- Jeda aman
@@ -141,7 +143,7 @@ local function loadConfig()
             local tbl = HttpService:JSONDecode(data)
             if type(tbl) == "table" then
                 for k, v in pairs(tbl) do
-                    if type(v) == type(Settings[k]) then
+                    if Settings[k] ~= nil then
                         Settings[k] = v
                     end
                 end
@@ -152,6 +154,12 @@ local function loadConfig()
     if Settings.autoSteal == nil then
         Settings.autoSteal = true
     end
+    if Settings.rarityTarget == nil then
+        Settings.rarityTarget = "Semua (Prioritas)"
+    end
+    if Settings.onlyTargetRarity == nil then
+        Settings.onlyTargetRarity = false
+    end
 end
 loadConfig()
 
@@ -159,13 +167,171 @@ loadConfig()
 local totalClaims = 0
 local lastClaimTime = os.clock()
 local hopBaseClaims = 0
+local lastClaimedRarity = "Belum Ada"
+local rarityStats = {
+    Divine    = 0,
+    Eternal   = 0,
+    Secret    = 0,
+    Cosmic    = 0,
+    Mythic    = 0,
+    Legendary = 0,
+    Epic      = 0,
+    Rare      = 0,
+    Uncommon  = 0,
+    Common    = 0,
+}
 
-local function registerClaim()
+local function registerClaim(rName)
     totalClaims = totalClaims + 1
     lastClaimTime = os.clock()
+    if rName and rName ~= "" then
+        lastClaimedRarity = rName
+        if rarityStats[rName] then
+            rarityStats[rName] = rarityStats[rName] + 1
+        end
+    end
 end
 
 -- Pelacakan klaim telur murni via trigger aksi stealEgg (100% bebas dari hook remote network yang memicu BAC)
+
+-- ==================== SISTEM RARITY STEAL AN EGG (LENGKAP) ===================
+-- Kasta Rarity: Divine > Eternal > Secret > Cosmic > Mythic > Legendary > Epic > Rare > Uncommon > Common
+local function getEggRarity(obj)
+    if not obj then return 1, "Common", "⚪" end
+
+    local text = string.lower(obj.Name or "")
+
+    -- Cek attributes & value objects
+    pcall(function()
+        for attrName, attrVal in pairs(obj:GetAttributes()) do
+            text = text .. " " .. string.lower(tostring(attrName)) .. " " .. string.lower(tostring(attrVal))
+        end
+    end)
+    pcall(function()
+        for _, child in ipairs(obj:GetChildren()) do
+            if child:IsA("StringValue") or child:IsA("IntValue") then
+                text = text .. " " .. string.lower(child.Name) .. " " .. string.lower(tostring(child.Value))
+            end
+        end
+    end)
+
+    -- Cek ProximityPrompt (ActionText / ObjectText)
+    local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if prompt then
+        text = text .. " " .. string.lower(prompt.ActionText or "") .. " " .. string.lower(prompt.ObjectText or "")
+    end
+
+    -- 1. Divine (Kasta Tertinggi: Pendapatan Miliaran - Puluhan Miliar $/s)
+    if string.find(text, "divine") or string.find(text, "devine")
+        or string.find(text, "spirit world guardian") or string.find(text, "voidseer")
+        or string.find(text, "skeletal sabertooth") or string.find(text, "royal skywhale")
+        or string.find(text, "mecha scrambler") or string.find(text, "bone emperor")
+        or string.find(text, "aetheron") or string.find(text, "luminous cthulhu")
+        or string.find(text, "archangel") or string.find(text, "world burner")
+        or string.find(text, "shattered colossus") or string.find(text, "kitsune")
+        or string.find(text, "nightflame") or string.find(text, "unicorn") then
+        return 10, "Divine", "👑"
+    end
+
+    -- 2. Eternal (Kasta Dewa: Pendapatan Ratusan Juta - Miliaran $/s)
+    if string.find(text, "eternal")
+        or string.find(text, "octophant") or string.find(text, "rhinobear")
+        or string.find(text, "void serpent") or string.find(text, "gorilla king")
+        or string.find(text, "shattered drake") or string.find(text, "oni tiger")
+        or string.find(text, "world eater") or string.find(text, "dreadscale")
+        or string.find(text, "abomination kong") then
+        return 9, "Eternal", "⚡"
+    end
+
+    -- 3. Secret (Tersembunyi & Sangat Langka)
+    if string.find(text, "secret") or string.find(text, "galaxy") or string.find(text, "rift") or string.find(text, "celestial") or string.find(text, "abyss") then
+        return 8, "Secret", "🔮"
+    end
+
+    -- 4. Cosmic (Luar Angkasa)
+    if string.find(text, "cosmic") or string.find(text, "supernova") or string.find(text, "nebula") then
+        return 7, "Cosmic", "🌌"
+    end
+
+    -- 5. Mythic (Mitos)
+    if string.find(text, "mythic") or string.find(text, "hydra") or string.find(text, "pegasus") or string.find(text, "chimera") then
+        return 6, "Mythic", "🌟"
+    end
+
+    -- 6. Legendary (Legendaris)
+    if string.find(text, "legendary") or string.find(text, "dragon") or string.find(text, "phoenix") then
+        return 5, "Legendary", "🔥"
+    end
+
+    -- 7. Epic (Epik)
+    if string.find(text, "epic") or string.find(text, "golem") or string.find(text, "griffin") then
+        return 4, "Epic", "💎"
+    end
+
+    -- 8. Rare (Langka)
+    if string.find(text, "rare") then
+        return 3, "Rare", "🔹"
+    end
+
+    -- 9. Uncommon (Menengah)
+    if string.find(text, "uncommon") or string.find(text, "fennec") then
+        return 2, "Uncommon", "🟢"
+    end
+
+    return 1, "Common", "⚪"
+end
+
+local function parseTargetRarity(str)
+    if not str then return 0 end
+    local s = string.lower(str)
+    if string.find(s, "divine") or string.find(s, "devine") then return 10
+    elseif string.find(s, "eternal") then return 9
+    elseif string.find(s, "secret") then return 8
+    elseif string.find(s, "cosmic") then return 7
+    elseif string.find(s, "mythic") then return 6
+    elseif string.find(s, "legendary") then return 5
+    elseif string.find(s, "epic") then return 4
+    elseif string.find(s, "rare") then return 3
+    elseif string.find(s, "uncommon") then return 2
+    elseif string.find(s, "common") then return 1
+    end
+    return 0 -- 0 berarti "Semua (Prioritas Tertinggi)"
+end
+
+local function hasHighTierEggInServer()
+    local found = false
+    local function check(obj)
+        if found or not obj then return end
+        local score = getEggRarity(obj)
+        if score >= 9 then -- Eternal (9) atau Divine (10)
+            found = true
+        end
+    end
+    local containers = {
+        Workspace:FindFirstChild("Eggs"),
+        Workspace:FindFirstChild("FieldEggs"),
+        Workspace:FindFirstChild("SpawnedEggs"),
+        Workspace:FindFirstChild("EggsFolder"),
+        Workspace:FindFirstChild("Nests"),
+        Workspace:FindFirstChild("EggWorld"),
+        Workspace:FindFirstChild("Map"),
+    }
+    for _, folder in ipairs(containers) do
+        if folder then
+            for _, item in ipairs(folder:GetChildren()) do
+                check(item)
+                if found then return true end
+            end
+        end
+    end
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Model") or obj:IsA("Folder") then
+            check(obj)
+            if found then return true end
+        end
+    end
+    return found
+end
 
 -- ==================== NATIVE STEAL & EGG ENGINE (100% CLEAN) ===================
 -- 100% Native Luau: Tanpa holy.lua, tanpa key, dan bebas dari dependensi nrlscript
@@ -174,14 +340,19 @@ local function getHrp()
     return chr and chr:FindFirstChild("HumanoidRootPart")
 end
 
--- Temukan telur terdekat secara dinamis dari posisi pemain saat ini
+-- Temukan telur terdekat secara dinamis dengan filter & prioritas Rarity
 local function getClosestEgg(maxDist)
     local hrp = getHrp()
-    if not hrp then return nil, 9999 end
+    if not hrp then return nil, 9999, "Common" end
 
     local myPos = hrp.Position
     local bestEgg = nil
     local bestDist = maxDist or (Settings.maxDistance or 250)
+    local bestScore = -1
+    local bestRarityName = "Common"
+
+    local targetTier = parseTargetRarity(Settings.rarityTarget)
+    local onlyTarget = Settings.onlyTargetRarity == true
 
     local function checkObj(obj)
         if not (obj and obj.Parent) then return end
@@ -192,9 +363,48 @@ local function getClosestEgg(maxDist)
         if not part then return end
 
         local d = (myPos - part.Position).Magnitude
-        if d < bestDist then
-            bestDist = d
+        if d > (Settings.maxDistance or 250) then return end
+
+        local score, rName = getEggRarity(obj)
+
+        -- Jika mode "Hanya Ambil Rarity Ini" aktif: abaikan telur di bawah tier target
+        if onlyTarget and targetTier > 0 then
+            if score < targetTier then return end
+        end
+
+        local isBetter = false
+        if targetTier > 0 and not onlyTarget then
+            local currentMeets = (score >= targetTier)
+            local bestMeets = (bestScore >= targetTier)
+            if currentMeets and not bestMeets then
+                isBetter = true
+            elseif currentMeets and bestMeets then
+                if score > bestScore then
+                    isBetter = true
+                elseif score == bestScore and d < bestDist then
+                    isBetter = true
+                end
+            elseif not currentMeets and not bestMeets then
+                if score > bestScore then
+                    isBetter = true
+                elseif score == bestScore and d < bestDist then
+                    isBetter = true
+                end
+            end
+        else
+            -- Mode default: Prioritaskan score Rarity tertinggi; jika sama, jarak terdekat
+            if score > bestScore then
+                isBetter = true
+            elseif score == bestScore and d < bestDist then
+                isBetter = true
+            end
+        end
+
+        if isBetter then
             bestEgg = obj
+            bestDist = d
+            bestScore = score
+            bestRarityName = rName
         end
     end
 
@@ -245,7 +455,7 @@ local function getClosestEgg(maxDist)
         end
     end
 
-    return bestEgg, bestDist
+    return bestEgg, bestDist, bestRarityName
 end
 
 -- Sistem Navigasi Alami Manusiawi (Smart Pathfinding & Obstacle Avoidance)
@@ -361,7 +571,7 @@ local function moveToTarget(targetPos, stopDist)
 end
 
 -- Interaksi Telur yang 100% Imun terhadap Anti-Cheat BAC-7581 & Tampak Alami
-local function stealEgg(eggObj)
+local function stealEgg(eggObj, eggRarity)
     if not (eggObj and eggObj.Parent) then return false end
     local hrp = getHrp()
     if not hrp then return false end
@@ -426,7 +636,7 @@ local function stealEgg(eggObj)
         end
     end)
     if success then
-        registerClaim()
+        registerClaim(eggRarity)
     end
     return success
 end
@@ -435,9 +645,9 @@ end
 task.spawn(function()
     while getgenv()[SCRIPT_ID] == RUN_ID do
         if Settings.autoSteal then
-            local closestEgg, dist = getClosestEgg(Settings.maxDistance or 250)
+            local closestEgg, dist, eggRarity = getClosestEgg(Settings.maxDistance or 250)
             if closestEgg and closestEgg.Parent then
-                stealEgg(closestEgg)
+                stealEgg(closestEgg, eggRarity)
                 -- Jeda acak manusiawi (human-like debounce) antar pengambilan telur
                 local delayVal = Settings.stealDelay or 0.4
                 if Settings.safeMode then
@@ -754,6 +964,14 @@ task.spawn(function()
                 ready = (claimsGained >= (Settings.hopSteals or 40))
             elseif mode == "No Match" or mode:find("Telur") then
                 ready = (claimsGained > 0 or elapsedSec > 90) and (noMatchSec >= (Settings.hopNoMatchDelay or 60))
+            elseif mode:find("Divine") or mode:find("Eternal") then
+                -- Tunggu minimal 15 detik setelah load server agar folder telur sempat spawn
+                if elapsedSec >= 15 then
+                    local hasHighTier = hasHighTierEggInServer()
+                    if not hasHighTier then
+                        ready = true
+                    end
+                end
             else -- Any / Bebas
                 ready = (elapsedSec >= (Settings.hopInterval or 12) * 60)
                      or (claimsGained >= (Settings.hopSteals or 40))
@@ -1519,13 +1737,29 @@ toggle(farmL, "Mode Halus (Anti-Cheat)", "safeMode")
 slider(farmL, "Jeda Ambil Telur (detik)", "stealDelay", 0.1, 1.5, 0.05)
 slider(farmL, "Jarak Telur Terjauh", "maxDistance", 50, 600, 25)
 
+section(farmR, "Filter Rarity (Lengkap)")
+dropdown(farmR, "Pilih Target Rarity", "rarityTarget", {
+    "Semua (Prioritas)",
+    "👑 Divine",
+    "⚡ Eternal",
+    "🔮 Secret",
+    "🌌 Cosmic",
+    "🌟 Mythic",
+    "🔥 Legendary",
+    "💎 Epic",
+    "🔹 Rare",
+    "🟢 Uncommon",
+    "⚪ Common"
+})
+toggle(farmR, "Hanya Ambil Rarity Ini", "onlyTargetRarity")
+
 section(farmR, "Buka Telur (Hatch)")
 toggle(farmR, "Buka Telur Otomatis", "autoHatch")
 dropdown(farmR, "Sekali Buka Berapa Telur", "hatchAmount", { 1, 3, 8 })
 
 section(farmR, "Hasil Panen")
 local ClaimsCard = Instance.new("Frame")
-ClaimsCard.Size = UDim2.new(1, -4, 0, 34)
+ClaimsCard.Size = UDim2.new(1, -4, 0, 48)
 ClaimsCard.BackgroundColor3 = Theme.Card
 ClaimsCard.BackgroundTransparency = 0.25
 ClaimsCard.BorderSizePixel = 0
@@ -1536,20 +1770,31 @@ addStroke(Theme.Border, 1, ClaimsCard)
 local EggCountLbl = Instance.new("TextLabel")
 EggCountLbl.Text = "Telur Terkumpul: 0"
 EggCountLbl.Font = FONT_BOLD
-EggCountLbl.TextSize = 11
+EggCountLbl.TextSize = 10.5
 EggCountLbl.TextColor3 = Theme.Green
-EggCountLbl.Position = UDim2.new(0, 8, 0, 3)
-EggCountLbl.Size = UDim2.new(1, -16, 0, 15)
+EggCountLbl.Position = UDim2.new(0, 8, 0, 2)
+EggCountLbl.Size = UDim2.new(1, -16, 0, 14)
 EggCountLbl.TextXAlignment = Enum.TextXAlignment.Left
 EggCountLbl.BackgroundTransparency = 1
 EggCountLbl.Parent = ClaimsCard
 
+local EggRarityLbl = Instance.new("TextLabel")
+EggRarityLbl.Text = "👑 Div: 0 | ⚡ Eter: 0 | 🔮 Sec: 0"
+EggRarityLbl.Font = FONT_BOLD
+EggRarityLbl.TextSize = 9
+EggRarityLbl.TextColor3 = Theme.Accent
+EggRarityLbl.Position = UDim2.new(0, 8, 0, 17)
+EggRarityLbl.Size = UDim2.new(1, -16, 0, 14)
+EggRarityLbl.TextXAlignment = Enum.TextXAlignment.Left
+EggRarityLbl.BackgroundTransparency = 1
+EggRarityLbl.Parent = ClaimsCard
+
 local EggRateLbl = Instance.new("TextLabel")
-EggRateLbl.Text = "Status: Aktif & Siap Panen"
+EggRateLbl.Text = "Terakhir: Siap Panen"
 EggRateLbl.Font = FONT_REG
-EggRateLbl.TextSize = 9
+EggRateLbl.TextSize = 8.5
 EggRateLbl.TextColor3 = Theme.TextSub
-EggRateLbl.Position = UDim2.new(0, 8, 0, 18)
+EggRateLbl.Position = UDim2.new(0, 8, 0, 32)
 EggRateLbl.Size = UDim2.new(1, -16, 0, 13)
 EggRateLbl.TextXAlignment = Enum.TextXAlignment.Left
 EggRateLbl.BackgroundTransparency = 1
@@ -1559,6 +1804,8 @@ task.spawn(function()
     while getgenv()[SCRIPT_ID] == RUN_ID do
         task.wait(1)
         EggCountLbl.Text = "Telur Terkumpul: " .. tostring(totalClaims)
+        EggRarityLbl.Text = string.format("👑 Div: %d | ⚡ Eter: %d | 🔮 Sec: %d", rarityStats.Divine or 0, rarityStats.Eternal or 0, rarityStats.Secret or 0)
+        EggRateLbl.Text = "Terakhir: " .. tostring(lastClaimedRarity)
         MiniLabel.Text = "🔥 Yancok: " .. tostring(totalClaims) .. " ⚡"
     end
 end)
@@ -1567,7 +1814,7 @@ end)
 local hopL, hopR = makePage("🚀 Pindah", 2)
 section(hopL, "Kapan Pindah Server?")
 toggle(hopL, "Pindah Server Otomatis", "autoHop")
-dropdown(hopL, "Pindah Kalau", "hopWhen", { "Bebas / Kapan Saja", "Target Tercapai", "Waktu Habis", "Telur Habis" })
+dropdown(hopL, "Pindah Kalau", "hopWhen", { "Bebas / Kapan Saja", "Target Tercapai", "Waktu Habis", "Telur Habis", "Tidak Ada Divine/Eternal" })
 slider(hopL, "Tunggu Telur Baru (detik)", "hopNoMatchDelay", 5, 180, 5)
 slider(hopL, "Lama di Server (menit)", "hopInterval", 1, 60, 1)
 slider(hopL, "Target Jumlah Telur", "hopSteals", 10, 200, 5)
