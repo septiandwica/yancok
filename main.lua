@@ -88,7 +88,10 @@ local CFG_PATH   = CFG_FOLDER .. "/config.json"
 local Settings = {
     -- 1. Farm Telur & Stealth
     autoSteal         = true,               -- ON (Langsung otomatis jalan)
-    rarityTarget      = "Semua (Prioritas)",-- "Semua (Prioritas)" | "👑 Divine" | "⚡ Eternal" | "🔮 Secret" | ...
+    rarityTarget      = "👑 Divine + ⚡ Eternal + 🔮 Secret", -- Target rarity
+    targetDivine      = true,               -- 👑 Ambil Divine
+    targetEternal     = true,               -- ⚡ Ambil Eternal
+    targetSecret      = true,               -- 🔮 Ambil Secret
     onlyTargetRarity  = false,              -- Jika true, hanya ambil rarity terpilih
     movementMode      = "Safe Walk",        -- "Safe Walk" | "Smooth Glide" | "Instant CFrame"
     safeMode          = true,               -- Anti-Cheat Protection
@@ -154,8 +157,17 @@ local function loadConfig()
     if Settings.autoSteal == nil then
         Settings.autoSteal = true
     end
+    if Settings.targetDivine == nil then
+        Settings.targetDivine = true
+    end
+    if Settings.targetEternal == nil then
+        Settings.targetEternal = true
+    end
+    if Settings.targetSecret == nil then
+        Settings.targetSecret = true
+    end
     if Settings.rarityTarget == nil then
-        Settings.rarityTarget = "Semua (Prioritas)"
+        Settings.rarityTarget = "👑 Divine + ⚡ Eternal + 🔮 Secret"
     end
     if Settings.onlyTargetRarity == nil then
         Settings.onlyTargetRarity = false
@@ -281,21 +293,29 @@ local function getEggRarity(obj)
     return 1, "Common", "⚪"
 end
 
-local function parseTargetRarity(str)
-    if not str then return 0 end
-    local s = string.lower(str)
-    if string.find(s, "divine") or string.find(s, "devine") then return 10
-    elseif string.find(s, "eternal") then return 9
-    elseif string.find(s, "secret") then return 8
-    elseif string.find(s, "cosmic") then return 7
-    elseif string.find(s, "mythic") then return 6
-    elseif string.find(s, "legendary") then return 5
-    elseif string.find(s, "epic") then return 4
-    elseif string.find(s, "rare") then return 3
-    elseif string.find(s, "uncommon") then return 2
-    elseif string.find(s, "common") then return 1
+local function isEggTargeted(score, rName)
+    local targetStr = tostring(Settings.rarityTarget or "")
+    local s = string.lower(targetStr)
+
+    -- Cek pill buttons multi-select (Divine, Eternal, Secret)
+    if score == 10 and (Settings.targetDivine == true or s:find("divine")) then return true end
+    if score == 9 and (Settings.targetEternal == true or s:find("eternal")) then return true end
+    if score == 8 and (Settings.targetSecret == true or s:find("secret")) then return true end
+
+    -- Cek tier lainnya jika dipilih di dropdown
+    if s:find("cosmic") and score >= 7 then return true end
+    if s:find("mythic") and score >= 6 then return true end
+    if s:find("legendary") and score >= 5 then return true end
+    if s:find("epic") and score >= 4 then return true end
+    if s:find("rare") and score >= 3 then return true end
+    if s:find("uncommon") and score >= 2 then return true end
+
+    -- Jika Semua (Prioritas)
+    if s:find("semua") or s:find("prioritas") then
+        return true
     end
-    return 0 -- 0 berarti "Semua (Prioritas Tertinggi)"
+
+    return false
 end
 
 local function hasHighTierEggInServer()
@@ -351,7 +371,6 @@ local function getClosestEgg(maxDist)
     local bestScore = -1
     local bestRarityName = "Common"
 
-    local targetTier = parseTargetRarity(Settings.rarityTarget)
     local onlyTarget = Settings.onlyTargetRarity == true
 
     local function checkObj(obj)
@@ -366,25 +385,27 @@ local function getClosestEgg(maxDist)
         if d > (Settings.maxDistance or 250) then return end
 
         local score, rName = getEggRarity(obj)
+        local isTarget = isEggTargeted(score, rName)
 
-        -- Jika mode "Hanya Ambil Rarity Ini" aktif: abaikan telur di bawah tier target
-        if onlyTarget and targetTier > 0 then
-            if score < targetTier then return end
+        -- Jika mode "Hanya Ambil Rarity Ini" aktif: abaikan telur yang tidak ditargetkan
+        if onlyTarget and not isTarget then
+            return
         end
 
         local isBetter = false
-        if targetTier > 0 and not onlyTarget then
-            local currentMeets = (score >= targetTier)
-            local bestMeets = (bestScore >= targetTier)
-            if currentMeets and not bestMeets then
+        if not onlyTarget then
+            local currentTarget = isTarget
+            local bestTarget = (bestScore >= 0 and isEggTargeted(bestScore, bestRarityName))
+
+            if currentTarget and not bestTarget then
                 isBetter = true
-            elseif currentMeets and bestMeets then
+            elseif currentTarget and bestTarget then
                 if score > bestScore then
                     isBetter = true
                 elseif score == bestScore and d < bestDist then
                     isBetter = true
                 end
-            elseif not currentMeets and not bestMeets then
+            elseif not currentTarget and not bestTarget then
                 if score > bestScore then
                     isBetter = true
                 elseif score == bestScore and d < bestDist then
@@ -392,7 +413,7 @@ local function getClosestEgg(maxDist)
                 end
             end
         else
-            -- Mode default: Prioritaskan score Rarity tertinggi; jika sama, jarak terdekat
+            -- Mode strict: hanya telur yang matches target
             if score > bestScore then
                 isBetter = true
             elseif score == bestScore and d < bestDist then
@@ -1691,7 +1712,7 @@ local function dropdown(parent, label, key, options)
     btn.BorderSizePixel = 0
     btn.Font = FONT_BOLD
     btn.Text = tostring(Settings[key])
-    btn.TextSize = 10
+    btn.TextSize = 9.5
     btn.TextColor3 = Theme.Accent
     btn.AutoButtonColor = false
     btn.Parent = card
@@ -1707,7 +1728,11 @@ local function dropdown(parent, label, key, options)
         Settings[key] = nextOpt
         btn.Text = tostring(nextOpt)
         saveConfig()
+        if type(onChange) == "function" then
+            pcall(onChange, nextOpt)
+        end
     end)
+    return btn
 end
 
 local function button(parent, label, onClick)
@@ -1737,20 +1762,91 @@ toggle(farmL, "Mode Halus (Anti-Cheat)", "safeMode")
 slider(farmL, "Jeda Ambil Telur (detik)", "stealDelay", 0.1, 1.5, 0.05)
 slider(farmL, "Jarak Telur Terjauh", "maxDistance", 50, 600, 25)
 
-section(farmR, "Filter Rarity (Lengkap)")
-dropdown(farmR, "Pilih Target Rarity", "rarityTarget", {
+section(farmR, "Filter Rarity (Pilih 3 Sekaligus)")
+
+local refreshPills
+
+dropdown(farmR, "Target Rarity", "rarityTarget", {
+    "👑 Divine + ⚡ Eternal + 🔮 Secret",
+    "👑 Divine + ⚡ Eternal",
+    "👑 Hanya Divine",
+    "⚡ Hanya Eternal",
+    "🔮 Hanya Secret",
     "Semua (Prioritas)",
-    "👑 Divine",
-    "⚡ Eternal",
-    "🔮 Secret",
-    "🌌 Cosmic",
-    "🌟 Mythic",
-    "🔥 Legendary",
-    "💎 Epic",
-    "🔹 Rare",
-    "🟢 Uncommon",
-    "⚪ Common"
-})
+    "🌌 Cosmic+",
+    "🌟 Mythic+",
+    "🔥 Legendary+",
+    "⚪ Semua Telur"
+}, function(opt)
+    local s = string.lower(tostring(opt))
+    if s:find("divine") and s:find("eternal") and s:find("secret") then
+        Settings.targetDivine = true
+        Settings.targetEternal = true
+        Settings.targetSecret = true
+    elseif s:find("divine") and s:find("eternal") then
+        Settings.targetDivine = true
+        Settings.targetEternal = true
+        Settings.targetSecret = false
+    elseif s:find("hanya divine") or opt == "👑 Divine" then
+        Settings.targetDivine = true
+        Settings.targetEternal = false
+        Settings.targetSecret = false
+    elseif s:find("hanya eternal") or opt == "⚡ Eternal" then
+        Settings.targetDivine = false
+        Settings.targetEternal = true
+        Settings.targetSecret = false
+    elseif s:find("hanya secret") or opt == "🔮 Secret" then
+        Settings.targetDivine = false
+        Settings.targetEternal = false
+        Settings.targetSecret = true
+    end
+    if refreshPills then refreshPills() end
+end)
+
+-- 3 Tombol Pill Sekaligus (Multi-Select Divine, Eternal, Secret)
+local TrioBar = Instance.new("Frame")
+TrioBar.Size = UDim2.new(1, -4, 0, 24)
+TrioBar.BackgroundTransparency = 1
+TrioBar.Parent = farmR
+
+local pillBtns = {}
+local function makePill(text, key, posX, width)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(width, -3, 1, 0)
+    btn.Position = UDim2.new(posX, 0, 0, 0)
+    btn.BorderSizePixel = 0
+    btn.Font = FONT_BOLD
+    btn.Text = text
+    btn.TextSize = 9.5
+    btn.AutoButtonColor = false
+    btn.Parent = TrioBar
+    addCorner(4, btn)
+
+    local function updateView()
+        local on = Settings[key] == true
+        btn.BackgroundColor3 = on and Theme.Accent or Theme.Control
+        btn.TextColor3 = on and Color3.fromRGB(0, 0, 0) or Theme.TextSub
+    end
+    updateView()
+    pillBtns[key] = updateView
+
+    btn.MouseButton1Click:Connect(function()
+        Settings[key] = not Settings[key]
+        updateView()
+        saveConfig()
+    end)
+end
+
+makePill("👑 Divine", "targetDivine", 0, 0.333)
+makePill("⚡ Eternal", "targetEternal", 0.333, 0.333)
+makePill("🔮 Secret", "targetSecret", 0.666, 0.334)
+
+refreshPills = function()
+    for _, fn in pairs(pillBtns) do
+        pcall(fn)
+    end
+end
+
 toggle(farmR, "Hanya Ambil Rarity Ini", "onlyTargetRarity")
 
 section(farmR, "Buka Telur (Hatch)")

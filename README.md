@@ -26,12 +26,14 @@ Menu didesain sangat simpel, rapi, dan mudah dimengerti. Terdapat 5 menu utama:
 
 ### 1. 🥚 Ambil Telur (Auto Steal & Filter Rarity)
 * **Ambil Telur Otomatis**: Karakter kamu jalan sendiri mencari telur terbaik dan mengambilnya tanpa perlu kamu gerak-gerakin jempol / keyboard.
-* **Filter Rarity Lengkap (Target Rarity)**:
-  * **Semua (Prioritas Tertinggi)**: Bot otomatis mengutamakan telur kasta paling dewa terlebih dahulu (**Divine** $\rightarrow$ **Eternal** $\rightarrow$ **Secret** $\rightarrow$ dst). Jika ada telur Divine di map, bot akan langsung memburunya sebelum mengambil telur biasa!
-  * Kamu juga bisa memilih target khusus: **`👑 Divine`**, **`⚡ Eternal`**, **`🔮 Secret`**, **`🌌 Cosmic`**, **`🌟 Mythic`**, **`🔥 Legendary`**, **`💎 Epic`**, **`🔹 Rare`**, **`🟢 Uncommon`**, atau **`⚪ Common`**.
+* **Pilih 3 Rarity Sekaligus (Divine, Eternal, Secret)**:
+  * Di bawah dropdown target, ada **3 tombol cepat**: **`[ 👑 Divine ]`**, **`[ ⚡ Eternal ]`**, dan **`[ 🔮 Secret ]`**.
+  * Cukup sekali sentuh / klik untuk mengaktifkan atau mematikan kombinasi mana pun yang kamu mau. Mau ambil ketiganya sekaligus? Cukup nyalakan ketiga tombolnya!
+* **Filter Target Rarity di Dropdown**:
+  * Pilihan preset otomatis: **`👑 Divine + ⚡ Eternal + 🔮 Secret`** *(Paling Populer)*, **`👑 Divine + ⚡ Eternal`**, **`👑 Hanya Divine`**, **`⚡ Hanya Eternal`**, **`🔮 Hanya Secret`**, atau **`Semua (Prioritas Tertinggi)`**.
 * **Hanya Ambil Rarity Ini (Toggle)**:
-  * Jika **AKTIF**: Karakter **HANYA** akan mencuri telur dengan kasta yang kamu pilih. Telur biasa/sampah akan diabaikan!
-  * Jika **MATI**: Karakter memprioritaskan kasta yang kamu pilih dulu, jika sudah habis baru mengambil telur apa saja yang terdekat.
+  * Jika **AKTIF**: Karakter **HANYA** akan mencuri telur kasta yang dipilih (misal hanya Divine, Eternal, dan Secret). Telur biasa/sampah akan diabaikan!
+  * Jika **MATI**: Karakter memprioritaskan kasta dewa dulu (Divine $\rightarrow$ Eternal $\rightarrow$ Secret), jika sudah habis baru mengambil telur apa saja yang terdekat.
 * **Cara Jalan Karakter**:
   * **Jalan Santai (Paling Aman)**: Karakter jalan biasa seperti pemain asli *(paling direkomendasikan & anti-kick)*.
   * **Meluncur Mulus**: Karakter meluncur mulus ke arah telur *(lebih cepat)*.
