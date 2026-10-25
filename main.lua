@@ -44,14 +44,15 @@ local PLACE_ID    = game.PlaceId
 local CURRENT_JOB = game.JobId
 
 -- ============================ CONTAINER PROTEKSI ============================
--- Prioritaskan gethui() Delta jika bukan CoreGui (CoreGui menyebabkan crash / force close di mobile)
+-- Prioritaskan gethui() dari Delta / executor agar 100% luput dari scan PlayerGui game (Persis Nasi Rendang)
 local CoreParent = LocalPlayer:WaitForChild("PlayerGui")
 pcall(function()
     if type(gethui) == "function" then
-        local ok, h = pcall(gethui)
-        if ok and h and h ~= game:FindService("CoreGui") then
-            CoreParent = h
-        end
+        local h = gethui()
+        if h then CoreParent = h end
+    elseif type(get_hidden_gui) == "function" then
+        local h = get_hidden_gui()
+        if h then CoreParent = h end
     end
 end)
 
