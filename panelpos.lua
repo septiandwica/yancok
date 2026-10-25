@@ -22,7 +22,7 @@ local LOADER_URL = "https://raw.githubusercontent.com/septiandwica/yancok/refs/h
 local function keepPos(win)
     pcall(function()
         win.AnchorPoint = Vector2.new(0.5, 0.5)
-        win.Position = UDim2.new(0.5, 0, 0.5, 0) -- posisi tengah layar
+        win.Position = UDim2.new(0.5, 0, 0.44, 0) -- posisi tengah atas (tidak mentok ke bawah)
     end)
 end
 
