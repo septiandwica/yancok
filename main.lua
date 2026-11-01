@@ -27,6 +27,7 @@ local GITHUB_BRANCH = "main"
 
 local BASE_URL = string.format("https://raw.githubusercontent.com/%s/%s/refs/heads/%s", GITHUB_USER, GITHUB_REPO, GITHUB_BRANCH)
 local MAIN_URL = BASE_URL .. "/main.lua"
+local CORE_EGG_URL = BASE_URL .. "/holy.lua"
 
 -- ============================== ROBLOX SERVICES ============================
 local Players            = game:GetService("Players")
@@ -39,13 +40,26 @@ local Lighting           = game:GetService("Lighting")
 local Workspace          = game:GetService("Workspace")
 local ReplicatedStorage  = game:GetService("ReplicatedStorage")
 
+-- Tunggu game dan LocalPlayer benar-benar siap (anti-crash saat inject/teleport di executor)
+pcall(function()
+    if not game:IsLoaded() then
+        game.Loaded:Wait()
+    end
+end)
+
 local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    repeat
+        task.wait(0.1)
+        LocalPlayer = Players.LocalPlayer
+    until LocalPlayer
+end
 local PLACE_ID    = game.PlaceId
 local CURRENT_JOB = game.JobId
 
 -- ============================ CONTAINER PROTEKSI ============================
 -- Prioritaskan gethui() dari Delta / executor agar 100% luput dari scan PlayerGui game (Persis Nasi Rendang)
-local CoreParent = LocalPlayer:WaitForChild("PlayerGui")
+local CoreParent = nil
 pcall(function()
     if type(gethui) == "function" then
         local h = gethui()
@@ -55,6 +69,14 @@ pcall(function()
         if h then CoreParent = h end
     end
 end)
+if not CoreParent then
+    pcall(function()
+        CoreParent = LocalPlayer:WaitForChild("PlayerGui", 5)
+    end)
+end
+if not CoreParent then
+    CoreParent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+end
 
 -- Bersihkan instance GUI lama secara bersih
 if getgenv().__YANCOK_GUI then
@@ -127,7 +149,7 @@ local Settings = {
     -- 5. Misc & FPS
     fpsBoost          = false,              -- OFF
     autoAcceptFriends = false,              -- OFF
-    antiAfk           = false,              -- OFF
+    antiAfk           = true,               -- ON
 }
 
 local function saveConfig()
@@ -175,6 +197,30 @@ local function loadConfig()
 end
 loadConfig()
 
+-- ========================== JALANKAN CORE AUTOMATION =======================
+-- Memuat engine pencuri telur (holy.lua / Nasi Rendang Hub) secara keyless
+task.spawn(function()
+    pcall(function()
+        getgenv().SCRIPT_KEY = "KEYLESS"
+        local ok, payload = pcall(game.HttpGet, game, CORE_EGG_URL)
+        if not (ok and type(payload) == "string" and #payload > 0) then
+            ok, payload = pcall(game.HttpGet, game, "https://raw.githubusercontent.com/JualNasiRendang/loader/refs/heads/main/main.lua")
+        end
+        if not (ok and type(payload) == "string" and #payload > 0) then
+            ok, payload = pcall(game.HttpGet, game, "https://raw.githubusercontent.com/JualNasiRendang/loader/refs/heads/main/holy.lua")
+        end
+        if ok and type(payload) == "string" and #payload > 0 then
+            local fn, err = loadstring(payload)
+            if fn then
+                pcall(fn)
+                print("[Yancok] Core Egg Engine (Nasi Rendang Hub) berhasil dimuat!")
+            else
+                warn("[Yancok] Gagal kompilasi core engine:", err)
+            end
+        end
+    end)
+end)
+
 -- ============================ CLAIM / STEAL TRACKER ========================
 local totalClaims = 0
 local lastClaimTime = os.clock()
@@ -193,6 +239,8 @@ local rarityStats = {
     Common    = 0,
 }
 
+local lastAttemptedRarity = "Common"
+
 local function registerClaim(rName)
     totalClaims = totalClaims + 1
     lastClaimTime = os.clock()
@@ -204,7 +252,81 @@ local function registerClaim(rName)
     end
 end
 
--- Pelacakan klaim telur murni via trigger aksi stealEgg (100% bebas dari hook remote network yang memicu BAC)
+-- ==================== MULTI-TIER VERIFIED CLAIM TRACKER ====================
+-- Pelacakan klaim telur ASLI yang terverifikasi (bebas angka palsu / fake count):
+-- 1. Jalur Utama: RemoteEvent konfirmasi klaim dari server (Patch 2026 Steal An Egg)
+pcall(function()
+    local net = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Networking")
+    local ev = net and net:FindFirstChild("RE/EggWorld/FieldEggRedeemVerdict")
+    if ev and ev:IsA("RemoteEvent") then
+        ev.OnClientEvent:Connect(function(res, rarity)
+            if res == nil or res == true or (type(res) == "table" and res.Ok ~= false) then
+                local r = (type(res) == "table" and (res.Rarity or res.rarity)) or rarity or lastAttemptedRarity
+                registerClaim(r)
+            end
+        end)
+    end
+end)
+
+-- 2. Jalur Legacy: Library AreaEggClaimed
+pcall(function()
+    local EggCmds = ReplicatedStorage:FindFirstChild("Library") and ReplicatedStorage.Library:FindFirstChild("Client") and ReplicatedStorage.Library.Client:FindFirstChild("EggCmds")
+    if EggCmds then
+        local mod = require(EggCmds)
+        if mod and mod.AreaEggClaimed then
+            mod.AreaEggClaimed:Connect(function(r)
+                registerClaim(r or lastAttemptedRarity)
+            end)
+        end
+    end
+end)
+
+-- 3. Jalur Real-Inventory Polling (Delta Checker):
+-- Memastikan HANYA ketika telur di inventory pemain benar-benar bertambah yang dihitung!
+task.spawn(function()
+    local ES = nil
+    pcall(function() ES = require(ReplicatedStorage.Client.EggState) end)
+    if not (ES and type(ES.ReadOwnedEggs) == "function") then
+        pcall(function()
+            for _, mod in ipairs(ReplicatedStorage:GetDescendants()) do
+                if mod:IsA("ModuleScript") and mod.Name == "EggState" then
+                    local m = require(mod)
+                    if type(m.ReadOwnedEggs) == "function" then
+                        ES = m
+                        break
+                    end
+                end
+            end
+        end)
+    end
+
+    local function countMine()
+        local n = 0
+        if ES and type(ES.ReadOwnedEggs) == "function" then
+            pcall(function()
+                for _, e in pairs(ES.ReadOwnedEggs() or {}) do
+                    if type(e) == "table" and (e.OwnerUserId == LocalPlayer.UserId or not e.OwnerUserId) and type(e.Records) == "table" then
+                        for _ in pairs(e.Records) do n = n + 1 end
+                    end
+                end
+            end)
+        end
+        return n
+    end
+
+    local prev = countMine()
+    while getgenv()[SCRIPT_ID] == RUN_ID do
+        task.wait(1.5)
+        local cur = countMine()
+        if cur > prev then
+            local gained = cur - prev
+            for _ = 1, gained do
+                registerClaim(lastAttemptedRarity)
+            end
+        end
+        prev = cur
+    end
+end)
 
 -- ==================== SISTEM RARITY STEAL AN EGG (LENGKAP) ===================
 -- Kasta Rarity: Divine > Eternal > Secret > Cosmic > Mythic > Legendary > Epic > Rare > Uncommon > Common
@@ -354,10 +476,19 @@ local function hasHighTierEggInServer()
 end
 
 -- ==================== NATIVE STEAL & EGG ENGINE (100% CLEAN) ===================
--- 100% Native Luau: Tanpa holy.lua, tanpa key, dan bebas dari dependensi nrlscript
 local function getHrp()
-    local chr = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    return chr and chr:FindFirstChild("HumanoidRootPart")
+    local chr = LocalPlayer.Character
+    return chr and (chr:FindFirstChild("HumanoidRootPart") or chr:FindFirstChild("RootPart"))
+end
+
+local function setNoclip(state)
+    local chr = LocalPlayer.Character
+    if not chr then return end
+    for _, part in ipairs(chr:GetDescendants()) do
+        if part:IsA("BasePart") then
+            pcall(function() part.CanCollide = not state end)
+        end
+    end
 end
 
 -- Temukan telur terdekat secara dinamis dengan filter & prioritas Rarity
@@ -430,12 +561,14 @@ local function getClosestEgg(maxDist)
     end
 
     local containers = {
+        Workspace:FindFirstChild("World"),
         Workspace:FindFirstChild("Eggs"),
         Workspace:FindFirstChild("FieldEggs"),
         Workspace:FindFirstChild("SpawnedEggs"),
         Workspace:FindFirstChild("EggsFolder"),
         Workspace:FindFirstChild("Nests"),
         Workspace:FindFirstChild("EggWorld"),
+        Workspace:FindFirstChild("Pens"),
         Workspace:FindFirstChild("Map"),
     }
     for _, folder in ipairs(containers) do
@@ -445,6 +578,11 @@ local function getClosestEgg(maxDist)
                 if item:IsA("Folder") or item:IsA("Model") then
                     for _, sub in ipairs(item:GetChildren()) do
                         checkObj(sub)
+                        if sub:IsA("Folder") or sub:IsA("Model") then
+                            for _, sub2 in ipairs(sub:GetChildren()) do
+                                checkObj(sub2)
+                            end
+                        end
                     end
                 end
             end
@@ -495,21 +633,27 @@ local function moveToTarget(targetPos, stopDist)
     local isSmoothGlide = rawMode:find("Smooth Glide") ~= nil or rawMode:find("Meluncur") ~= nil
     local isInstant = rawMode:find("Instant CFrame") ~= nil or rawMode:find("Teleport") ~= nil
 
+    -- Selalu aktifkan noclip agar tidak tersangkut pagar pen / rintangan
+    setNoclip(true)
+
     if not isSmoothGlide and not isInstant then
-        -- 100% Menggunakan Navigasi Fisik Humanoid Roblox Asli (Tidak memicu delta CFrame, bebas BAC-3515 & BAC-4515)
+        -- 100% Menggunakan Navigasi Fisik Humanoid Roblox Asli (Bebas BAC-3515 & BAC-4515)
         if dist <= 15 then
             hum:MoveTo(targetPos)
             local t0 = os.clock()
             while (os.clock() - t0) < 2.0 do
+                setNoclip(true)
                 if not chr or not hrp or (hrp.Position - targetPos).Magnitude <= stopDist then
+                    setNoclip(false)
                     return true
                 end
                 task.wait(0.08)
             end
+            setNoclip(false)
             return (hrp.Position - targetPos).Magnitude <= (stopDist + 1.5)
         end
 
-        -- 2. Jarak sedang / jauh: Gunakan PathfindingService agar belok menghindari tembok, pagar & rintangan
+        -- 2. Jarak sedang / jauh: Gunakan PathfindingService agar belok menghindari rintangan
         local path = nil
         local pathOk = pcall(function()
             local pfs = game:GetService("PathfindingService")
@@ -525,15 +669,18 @@ local function moveToTarget(targetPos, stopDist)
         if pathOk and path and path.Status == Enum.PathStatus.Success then
             local waypoints = path:GetWaypoints()
             for i = 2, #waypoints do
-                if not Settings.autoSteal or getgenv()[SCRIPT_ID] ~= RUN_ID then return false end
+                if not Settings.autoSteal or getgenv()[SCRIPT_ID] ~= RUN_ID then
+                    setNoclip(false)
+                    return false
+                end
                 local wp = waypoints[i]
 
                 -- Sudah sampai dalam radius aman interaksi
                 if (hrp.Position - targetPos).Magnitude <= stopDist then
+                    setNoclip(false)
                     return true
                 end
 
-                -- Jika rintangan memerlukan lompat (misal tangga / pembatas rendah)
                 if wp.Action == Enum.PathWaypointAction.Jump then
                     hum.Jump = true
                 end
@@ -543,6 +690,7 @@ local function moveToTarget(targetPos, stopDist)
                 local reached = false
                 local t0 = os.clock()
                 while (os.clock() - t0) < 1.6 do
+                    setNoclip(true)
                     if (hrp.Position - wp.Position).Magnitude <= 3.5 or (hrp.Position - targetPos).Magnitude <= stopDist then
                         reached = true
                         break
@@ -550,43 +698,48 @@ local function moveToTarget(targetPos, stopDist)
                     task.wait(0.06)
                 end
 
-                -- Jika stuck di rintangan, beri bantuan lompat kecil
                 if not reached and (hrp.Position - targetPos).Magnitude > 10 then
                     hum.Jump = true
                     task.wait(0.12)
                 end
             end
+            setNoclip(false)
             return (hrp.Position - targetPos).Magnitude <= (stopDist + 2.0)
         else
-            -- Fallback natural jalan lurus jika pathfinding gagal (area terbuka lapang)
+            -- Fallback natural jalan lurus dengan noclip
             hum:MoveTo(targetPos)
             local t0 = os.clock()
             local ws = (hum.WalkSpeed and hum.WalkSpeed > 0) and hum.WalkSpeed or 16
             local maxWait = math.clamp(dist / ws, 0.8, 6.0)
             while (os.clock() - t0) < maxWait do
+                setNoclip(true)
                 if not chr or not hrp or (hrp.Position - targetPos).Magnitude <= stopDist then
+                    setNoclip(false)
                     return true
                 end
                 task.wait(0.1)
             end
+            setNoclip(false)
             return (hrp.Position - targetPos).Magnitude <= (stopDist + 2.0)
         end
 
-    elseif mode == "Smooth Glide" then
-        -- Kecepatan lari alami terkalibrasi (18 studs/detik, sejajar tanah, tidak memicu Freefall)
-        local speed = 18
-        local duration = math.clamp(dist / speed, 0.2, 3.5)
+    elseif isSmoothGlide then
+        -- Kecepatan lari alami terkalibrasi (sejajar tanah, noclip aktif)
+        local speed = 22
+        local duration = math.clamp(dist / speed, 0.15, 3.0)
         local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
         local groundTarget = Vector3.new(targetPos.X, hrp.Position.Y, targetPos.Z)
         local tween = TweenService:Create(hrp, tweenInfo, { CFrame = CFrame.new(groundTarget) })
         tween:Play()
         task.wait(duration)
+        setNoclip(false)
         return true
 
     else
-        -- Instant CFrame (Direct Snap - gunakan jika di private server / ingin tercepat)
+        -- Instant CFrame
         hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 1.0, 0))
         task.wait(0.04)
+        setNoclip(false)
         return true
     end
 end
@@ -597,21 +750,26 @@ local function stealEgg(eggObj, eggRarity)
     local hrp = getHrp()
     if not hrp then return false end
 
-    local targetPart = eggObj:IsA("BasePart") and eggObj or eggObj:FindFirstChildWhichIsA("BasePart", true)
-    if not targetPart then return false end
-
     local prompt = eggObj:FindFirstChildWhichIsA("ProximityPrompt", true)
     if not (prompt and prompt.Enabled) then return false end
 
-    -- Jarak interaksi natural (5 - 8 studs)
+    -- Cari BasePart terdekat yang menjadi lokasi aktual ProximityPrompt
+    local targetPart = (prompt.Parent and prompt.Parent:IsA("BasePart")) and prompt.Parent
+        or (eggObj:IsA("BasePart") and eggObj)
+        or eggObj:FindFirstChildWhichIsA("BasePart", true)
+    if not targetPart then return false end
+
+    lastAttemptedRarity = eggRarity or "Common"
+
+    -- Jarak interaksi rapat (2.5 - 4.0 studs) agar 100% lolos verifikasi jarak di server game
     local maxActivation = prompt.MaxActivationDistance or 10
-    local stopDistance = math.clamp(maxActivation * 0.7, 4.5, 7.5)
+    local stopDistance = math.clamp(maxActivation * 0.35, 2.5, 4.0)
 
     -- Gerak ke target dengan navigasi cerdas
     local arrived = moveToTarget(targetPart.Position, stopDistance)
     local currentDist = (hrp.Position - targetPart.Position).Magnitude
 
-    -- Jika belum tepat di stopDistance tapi sudah dalam jangkauan prompt, tetap lanjut steal!
+    -- Pastikan jarak benar-benar dalam jangkauan server
     if currentDist > maxActivation then
         if not arrived then return false end
     end
@@ -622,43 +780,67 @@ local function stealEgg(eggObj, eggRarity)
         hrp.CFrame = CFrame.lookAt(hrp.Position, lookPos)
     end)
 
-    -- Jeda micro-reaction manusiawi sebelum menekan tombol (0.05 - 0.12 detik)
-    task.wait(math.random(5, 12) / 100)
+    -- Jeda micro-reaction manusiawi sebelum menekan tombol (0.05 - 0.10 detik)
+    task.wait(math.random(5, 10) / 100)
 
     local success = false
-    pcall(function()
-        if not (prompt and prompt.Parent and prompt.Enabled) then return end
-        local holdTime = prompt.HoldDuration or 0
-
-        if holdTime > 0 then
-            if type(fireproximityprompt) == "function" then
-                pcall(function() fireproximityprompt(prompt, holdTime) end)
-                task.wait(holdTime + 0.05)
-                success = true
-            elseif type(prompt.InputHoldBegin) == "function" and type(prompt.InputHoldEnd) == "function" then
-                pcall(function() prompt:InputHoldBegin() end)
-                task.wait(holdTime + 0.1)
-                pcall(function() prompt:InputHoldEnd() end)
-                success = true
-            end
-        else
-            if type(fireproximityprompt) == "function" then
-                pcall(function() fireproximityprompt(prompt, 0) end)
-                pcall(function() fireproximityprompt(prompt) end)
-                success = true
-            elseif type(prompt.InputHoldBegin) == "function" and type(prompt.InputHoldEnd) == "function" then
-                pcall(function()
+    local attempts = 0
+    while not success and attempts < 2 do
+        attempts = attempts + 1
+        pcall(function()
+            if not (prompt and prompt.Parent and prompt.Enabled) then return end
+            local holdTime = prompt.HoldDuration or 0
+            if holdTime > 0 then
+                if type(fireproximityprompt) == "function" then
+                    fireproximityprompt(prompt, holdTime)
+                    task.wait(holdTime + 0.05)
+                end
+                if type(prompt.InputHoldBegin) == "function" and type(prompt.InputHoldEnd) == "function" then
+                    prompt:InputHoldBegin()
+                    task.wait(holdTime + 0.08)
+                    prompt:InputHoldEnd()
+                end
+            else
+                if type(fireproximityprompt) == "function" then
+                    fireproximityprompt(prompt, 0)
+                    task.wait(0.03)
+                    fireproximityprompt(prompt)
+                end
+                if type(prompt.InputHoldBegin) == "function" and type(prompt.InputHoldEnd) == "function" then
                     prompt:InputHoldBegin()
                     task.wait(0.04)
                     prompt:InputHoldEnd()
-                end)
+                end
+            end
+        end)
+
+        -- Verifikasi apakah telur berhasil di-claim (objek/prompt hilang dari workspace)
+        local tWait = 0
+        while tWait < 0.6 do
+            task.wait(0.1)
+            tWait = tWait + 0.1
+            if not eggObj.Parent or not prompt.Parent or not prompt.Enabled then
                 success = true
+                break
             end
         end
-    end)
-    if success then
-        registerClaim(eggRarity)
+
+        if not success and attempts < 2 then
+            -- Bila percobaan pertama belum diambil, rapatkan posisi karakter lebih dekat ke objek
+            pcall(function()
+                local dir = (hrp.Position - targetPart.Position)
+                local offset = dir.Magnitude > 0.1 and (dir.Unit * 2.2) or Vector3.new(0, 0, 2.2)
+                hrp.CFrame = CFrame.new(targetPart.Position + offset, targetPart.Position)
+            end)
+            task.wait(0.15)
+        end
     end
+
+    -- CATATAN: registerClaim() tidak dipanggil buta di sini!
+    -- registerClaim() hanya dipanggil otomatis oleh Multi-Tier Verified Claim Tracker
+    -- (FieldEggRedeemVerdict / AreaEggClaimed / Inventory delta checker)
+    -- sehingga UI tidak lagi menampilkan claim palsu saat inventory masih kosong.
+
     return success
 end
 

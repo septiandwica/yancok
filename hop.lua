@@ -23,7 +23,7 @@ local LocalPlayer  = Players.LocalPlayer
 local PLACE        = game.PlaceId
 
 -- URL auto-execute (download ulang script dari sini setelah hop)
-local LOADER_URL = "https://raw.githubusercontent.com/septiandwica/yancok/refs/heads/main/hop.lua"
+local LOADER_URL = "https://raw.githubusercontent.com/septiandwica/yancok/refs/heads/main/main.lua"
 
 -- ============================ config ============================
 local CFG_FOLDER = "StealAnEgg"
